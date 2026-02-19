@@ -1,47 +1,61 @@
 /**
- * Email Utility – sends verification emails using Nodemailer.
+ * Email Utility – sends verification emails using Brevo HTTP API.
  *
- * Uses a free Gmail App Password or any SMTP credentials.
+ * Uses Brevo's transactional email REST API (HTTPS port 443)
+ * instead of SMTP, because many free hosting providers (Render, etc.)
+ * block outbound SMTP connections on ports 587/465.
+ *
  * Configure via environment variables:
- *   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM
- *
- * For quick testing, set SMTP_USER and SMTP_PASS to a Gmail account
- * with "App Passwords" enabled (2FA required).
+ *   BREVO_API_KEY  – your Brevo API key (or SMTP key, which also works)
+ *   SMTP_PASS      – fallback: same Brevo key
+ *   SMTP_FROM      – sender email (must be verified in Brevo)
  */
 
-const nodemailer = require("nodemailer");
+const https = require("https");
 
-// ── SMTP Configuration ──────────────────────────────────────
-const SMTP_HOST = process.env.SMTP_HOST || "smtp-relay.brevo.com";
-const SMTP_PORT = parseInt(process.env.SMTP_PORT || "587", 10);
-const SMTP_USER = process.env.SMTP_USER || "";
-const SMTP_PASS = process.env.SMTP_PASS || "";
-const SMTP_FROM = process.env.SMTP_FROM || "MediaBot <kripaverma410@gmail.com>";
+// Brevo API key: prefer BREVO_API_KEY, fall back to SMTP_PASS (same key works for both)
+const BREVO_API_KEY = process.env.BREVO_API_KEY || process.env.SMTP_PASS || "";
+const SENDER_EMAIL = (process.env.SMTP_FROM || "kripaverma410@gmail.com").replace(/.*<(.+)>/, "$1");
+const SENDER_NAME = "MediaBot";
 
-let transporter = null;
+/**
+ * Send an email via Brevo HTTP API.
+ * Returns a promise that resolves to the parsed JSON response.
+ */
+function brevoSendEmail(payload) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(payload);
+    const options = {
+      hostname: "api.brevo.com",
+      port: 443,
+      path: "/v3/smtp/email",
+      method: "POST",
+      headers: {
+        "accept": "application/json",
+        "api-key": BREVO_API_KEY,
+        "content-type": "application/json",
+        "content-length": Buffer.byteLength(data),
+      },
+      timeout: 15000,
+    };
 
-function getTransporter() {
-  if (transporter) return transporter;
+    const req = https.request(options, (res) => {
+      let body = "";
+      res.on("data", (chunk) => (body += chunk));
+      res.on("end", () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          try { resolve(JSON.parse(body)); } catch { resolve({ raw: body }); }
+        } else {
+          reject(new Error(`Brevo API ${res.statusCode}: ${body}`));
+        }
+      });
+    });
 
-  if (!SMTP_USER || !SMTP_PASS) {
-    console.warn("⚠ SMTP credentials not set. Email sending will be simulated.");
-    return null;
-  }
-
-  transporter = nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: SMTP_PORT,
-    secure: false,
-    auth: {
-      user: SMTP_USER,
-      pass: SMTP_PASS,
-    },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000,
+    req.on("error", (err) => reject(err));
+    req.on("timeout", () => { req.destroy(); reject(new Error("Brevo API request timeout (15s)")); });
+    req.write(data);
+    req.end();
   });
-
-  return transporter;
 }
 
 /**
@@ -49,8 +63,6 @@ function getTransporter() {
  * Returns true if sent (or simulated), false on error.
  */
 async function sendVerificationEmail(toEmail, code, userName) {
-  const t = getTransporter();
-
   const htmlContent = `
   <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 500px; margin: 0 auto; background: linear-gradient(135deg, #0B0D17 0%, #1A1D2E 100%); border-radius: 16px; overflow: hidden;">
     <div style="background: linear-gradient(135deg, #A78BFA, #F472B6); padding: 30px; text-align: center;">
@@ -73,9 +85,9 @@ async function sendVerificationEmail(toEmail, code, userName) {
     </div>
   </div>`;
 
-  if (!t) {
+  if (!BREVO_API_KEY) {
     // Simulate sending — log to console
-    console.log(`\n📧 ── SIMULATED EMAIL ──────────────────────`);
+    console.log(`\n📧 ── SIMULATED EMAIL (no API key) ─────────`);
     console.log(`   To:   ${toEmail}`);
     console.log(`   Code: ${code}`);
     console.log(`──────────────────────────────────────────────\n`);
@@ -83,24 +95,17 @@ async function sendVerificationEmail(toEmail, code, userName) {
   }
 
   try {
-    const sendPromise = t.sendMail({
-      from: SMTP_FROM,
-      to: toEmail,
+    const result = await brevoSendEmail({
+      sender: { name: SENDER_NAME, email: SENDER_EMAIL },
+      to: [{ email: toEmail }],
       subject: `MediaBot – Your verification code is ${code}`,
-      html: htmlContent,
+      htmlContent: htmlContent,
     });
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("SMTP timeout after 15s")), 15000)
-    );
-    const info = await Promise.race([sendPromise, timeoutPromise]);
-    console.log(`📧 Verification email sent to ${toEmail}`);
-    console.log(`   MessageId: ${info.messageId}`);
-    console.log(`   Accepted:  ${JSON.stringify(info.accepted)}`);
-    console.log(`   Rejected:  ${JSON.stringify(info.rejected)}`);
-    console.log(`   Response:  ${info.response}`);
+    console.log(`📧 Verification email sent to ${toEmail} via Brevo API`);
+    console.log(`   Response: ${JSON.stringify(result)}`);
     return true;
   } catch (err) {
-    console.error("Email send error:", err.message);
+    console.error("Brevo API email error:", err.message);
     return false;
   }
 }
