@@ -19,21 +19,28 @@ const CLIENTS = {
   ios: {
     clientName: "IOS",
     clientVersion: "19.29.1",
+    clientId: 5,
     deviceMake: "Apple",
     deviceModel: "iPhone16,2",
+    osName: "iOS",
+    osVersion: "17.5.1",
     userAgent: "com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)",
     apiKey: "AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc",
   },
   android: {
     clientName: "ANDROID",
     clientVersion: "19.29.37",
+    clientId: 3,
     androidSdkVersion: 30,
+    osName: "Android",
+    osVersion: "11",
     userAgent: "com.google.android.youtube/19.29.37 (Linux; U; Android 11) gzip",
     apiKey: "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w",
   },
   tv_embedded: {
     clientName: "TVHTML5_SIMPLY_EMBEDDED_PLAYER",
     clientVersion: "2.0",
+    clientId: 85,
     userAgent: "Mozilla/5.0 (SMART-TV; Linux; Tizen 6.5) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/5.0 Chrome/85.0.4183.93 TV Safari/537.36",
     apiKey: "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
   },
@@ -97,81 +104,103 @@ async function _callPlayer(videoId, clientKey) {
   // Add platform-specific fields
   if (client.deviceMake) payload.context.client.deviceMake = client.deviceMake;
   if (client.deviceModel) payload.context.client.deviceModel = client.deviceModel;
+  if (client.osName) payload.context.client.osName = client.osName;
+  if (client.osVersion) payload.context.client.osVersion = client.osVersion;
   if (client.androidSdkVersion) payload.context.client.androidSdkVersion = client.androidSdkVersion;
 
   const body = JSON.stringify(payload);
 
-  return new Promise((resolve, reject) => {
-    const opts = {
-      hostname: "www.youtube.com",
-      path: `/youtubei/v1/player?key=${client.apiKey}&prettyPrint=false`,
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "User-Agent": client.userAgent,
-        "Content-Length": Buffer.byteLength(body),
-      },
-    };
+  // Use youtubei.googleapis.com (pure API server, no web bot detection)
+  // Fall back to www.youtube.com if googleapis fails
+  const hosts = ["youtubei.googleapis.com", "www.youtube.com"];
+  let lastErr = null;
 
-    const req = https.request(opts, (res) => {
-      let data = "";
-      res.on("data", (chunk) => (data += chunk));
-      res.on("end", () => {
-        try {
-          const json = JSON.parse(data);
-          const ps = json.playabilityStatus;
+  for (const hostname of hosts) {
+    try {
+      const result = await new Promise((resolve, reject) => {
+        const opts = {
+          hostname,
+          path: `/youtubei/v1/player?key=${client.apiKey}&prettyPrint=false`,
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "User-Agent": client.userAgent,
+            "Content-Length": Buffer.byteLength(body),
+            "X-Goog-Api-Key": client.apiKey,
+            "X-Youtube-Client-Name": String(client.clientId || 5),
+            "X-Youtube-Client-Version": client.clientVersion,
+          },
+        };
 
-          if (!ps || ps.status !== "OK") {
-            const reason = ps?.reason || ps?.status || "Unknown error";
-            reject(new Error(`YouTube: ${reason}`));
-            return;
-          }
+        const req = https.request(opts, (res) => {
+          let data = "";
+          res.on("data", (chunk) => (data += chunk));
+          res.on("end", () => {
+            try {
+              const json = JSON.parse(data);
+              const ps = json.playabilityStatus;
 
-          const vd = json.videoDetails || {};
-          const sd = json.streamingData || {};
-          const formats = sd.formats || [];
-          const adaptive = sd.adaptiveFormats || [];
+              if (!ps || ps.status !== "OK") {
+                const reason = ps?.reason || ps?.status || "Unknown error";
+                reject(new Error(`YouTube: ${reason}`));
+                return;
+              }
 
-          const audioStreams = adaptive
-            .filter((f) => f.mimeType && f.mimeType.startsWith("audio/") && f.url)
-            .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+              const vd = json.videoDetails || {};
+              const sd = json.streamingData || {};
+              const formats = sd.formats || [];
+              const adaptive = sd.adaptiveFormats || [];
 
-          const videoStreams = adaptive
-            .filter((f) => f.mimeType && f.mimeType.startsWith("video/") && f.url)
-            .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+              const audioStreams = adaptive
+                .filter((f) => f.mimeType && f.mimeType.startsWith("audio/") && f.url)
+                .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
 
-          const muxedStreams = formats
-            .filter((f) => f.url)
-            .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+              const videoStreams = adaptive
+                .filter((f) => f.mimeType && f.mimeType.startsWith("video/") && f.url)
+                .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
 
-          if (audioStreams.length === 0 && muxedStreams.length === 0) {
-            reject(new Error(`No downloadable streams found (client: ${clientKey})`));
-            return;
-          }
+              const muxedStreams = formats
+                .filter((f) => f.url)
+                .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
 
-          resolve({
-            title: vd.title || "video",
-            duration: parseInt(vd.lengthSeconds || "0", 10),
-            channelName: vd.author || "",
-            audioStreams,
-            videoStreams,
-            muxedStreams,
-            client: clientKey,
+              if (audioStreams.length === 0 && muxedStreams.length === 0) {
+                reject(new Error(`No downloadable streams found (client: ${clientKey}, host: ${hostname})`));
+                return;
+              }
+
+              resolve({
+                title: vd.title || "video",
+                duration: parseInt(vd.lengthSeconds || "0", 10),
+                channelName: vd.author || "",
+                audioStreams,
+                videoStreams,
+                muxedStreams,
+                client: clientKey,
+              });
+            } catch (err) {
+              // Log first 200 chars to understand what was returned
+              console.log(`[INNERTUBE] ${hostname}/${clientKey}: parse error, first 200 chars: ${data.substring(0, 200)}`);
+              reject(new Error(`Failed to parse response from ${hostname}: ${err.message}`));
+            }
           });
-        } catch (err) {
-          reject(new Error(`Failed to parse response: ${err.message}`));
-        }
-      });
-    });
+        });
 
-    req.on("error", reject);
-    req.setTimeout(30000, () => {
-      req.destroy();
-      reject(new Error("Request timed out"));
-    });
-    req.write(body);
-    req.end();
-  });
+        req.on("error", reject);
+        req.setTimeout(30000, () => {
+          req.destroy();
+          reject(new Error(`Request to ${hostname} timed out`));
+        });
+        req.write(body);
+        req.end();
+      });
+      return result; // success
+    } catch (err) {
+      console.log(`[INNERTUBE] ${hostname}/${clientKey}: ${err.message}`);
+      lastErr = err;
+    }
+  }
+
+  throw lastErr;
 }
 
 /**

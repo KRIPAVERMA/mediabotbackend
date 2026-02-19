@@ -256,6 +256,18 @@ function _downloadWithYtDlp(jobId, job, safeURL, isAudio, expectedPlatform, auth
     '--user-agent "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"',
   ].join(" ");
 
+  // Platform-specific flags
+  const platformFlags = [];
+  if (expectedPlatform === "facebook") {
+    // Facebook needs browser-like headers and impersonation to avoid "Cannot parse data"
+    platformFlags.push(
+      '--add-headers "Accept-Language:en-US,en;q=0.9"',
+      '--add-headers "Sec-Fetch-Mode:navigate"',
+      '--add-headers "Sec-Fetch-Site:none"',
+      '--add-headers "Accept:text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"',
+    );
+  }
+
   const commonFlags = [
     "--no-playlist",
     "--retries 5",
@@ -267,6 +279,7 @@ function _downloadWithYtDlp(jobId, job, safeURL, isAudio, expectedPlatform, auth
     "--socket-timeout 30",
     "--geo-bypass",
     socialFlags,
+    ...platformFlags,
   ].join(" ");
 
   const command = isAudio
