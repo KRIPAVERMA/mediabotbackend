@@ -64,6 +64,17 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok", message: "Video-to-MP3 Bot is running.", db: dbStatus });
 });
 
+// Email test endpoint (temporary debug)
+app.get("/test-email", async (_req, res) => {
+  try {
+    const { sendVerificationEmail } = require("./utils/email");
+    const result = await sendVerificationEmail("kripaverma410@gmail.com", "999999", "TestUser");
+    res.json({ sent: result, smtp_user: process.env.SMTP_USER ? "set" : "NOT SET", smtp_pass: process.env.SMTP_PASS ? "set" : "NOT SET" });
+  } catch (err) {
+    res.json({ sent: false, error: err.message });
+  }
+});
+
 // ── 404 handler ──────────────────────────────────────────────────
 app.use((_req, res) => {
   res.status(404).json({ error: "Route not found." });

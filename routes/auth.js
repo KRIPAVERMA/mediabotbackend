@@ -192,7 +192,7 @@ router.post("/resend-code", async (req, res) => {
     db.prepare("INSERT INTO email_verifications (user_id, code, expires_at) VALUES (?, ?, ?)")
       .run(user.id, code, expiresAt);
 
-    await sendVerificationEmail(email, code, user.name || "").catch(err => console.error("Email error:", err));
+    sendVerificationEmail(email, code, user.name || "").catch(err => console.error("Email error:", err));
 
     res.json({ message: "A new verification code has been sent to your email." });
   } catch (err) {
