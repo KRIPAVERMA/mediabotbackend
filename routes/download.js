@@ -8,9 +8,10 @@
 
 const express = require("express");
 const router = express.Router();
-const { handleDownload, getJobStatus, getJobFile } = require("../controllers/downloadController");
+const { handleDownload, getJobStatus, getJobFile, debugJobs } = require("../controllers/downloadController");
 
 router.post("/", handleDownload);
+router.get("/debug/jobs", debugJobs);   // MUST be before /:id
 router.get("/:id", getJobStatus);
 router.get("/:id/file", getJobFile);
 
