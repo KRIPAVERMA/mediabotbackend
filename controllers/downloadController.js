@@ -84,15 +84,25 @@ function handleDownload(req, res) {
   const safeURL = sanitizeURL(url.trim());
   const outputTemplate = path.join(DOWNLOADS_DIR, `${jobId}.%(ext)s`);
 
+  const ytFlags = [
+    '--extractor-args "youtube:player_client=ios,web"',
+    '--user-agent "com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)"',
+  ].join(" ");
+
+  const socialFlags = [
+    '--user-agent "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"',
+  ].join(" ");
+
   const commonFlags = [
     "--no-playlist",
-    "--retries 3",
-    "--fragment-retries 3",
+    "--retries 5",
+    "--fragment-retries 5",
     "--no-check-certificates",
+    "--force-ipv4",
     "--no-warnings",
-    expectedPlatform === "youtube"
-      ? '--extractor-args "youtube:player_client=android,web"'
-      : '--user-agent "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"',
+    "--extractor-retries 3",
+    "--socket-timeout 30",
+    expectedPlatform === "youtube" ? ytFlags : socialFlags,
   ].join(" ");
 
   const command = isAudio
@@ -105,7 +115,8 @@ function handleDownload(req, res) {
   exec(command, { timeout: 300_000, maxBuffer: 50 * 1024 * 1024 }, (execErr, stdout, stderr) => {
     if (execErr) {
       const rawMsg = (stderr || execErr.message || "").toString().toLowerCase();
-      console.error(`[JOB ${jobId}] FAIL:`, rawMsg.slice(0, 500));
+      const rawSnippet = (stderr || execErr.message || "").toString().slice(0, 300);
+      console.error(`[JOB ${jobId}] FAIL:`, rawMsg.slice(0, 800));
       cleanupPartialFiles(jobId);
 
       if (/private|login|age.restricted|sign.in/.test(rawMsg)) {
@@ -123,6 +134,8 @@ function handleDownload(req, res) {
         job.status = "error";
         job.error  = "Download failed. Check URL is valid and content is public.";
       }
+      // Attach raw error for debugging
+      job.rawError = rawSnippet;
       return;
     }
 
@@ -191,6 +204,7 @@ function getJobStatus(req, res) {
     status:   job.status,
     progress: job.progress,
     error:    job.error,
+    rawError: job.rawError || null,
     format:   job.format,
     fileSize: job.fileSize || 0,
   });

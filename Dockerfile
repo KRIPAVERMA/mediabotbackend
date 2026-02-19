@@ -26,7 +26,7 @@ COPY . .
 # Ensure writable directories exist
 RUN mkdir -p downloads db
 
-# Railway injects PORT env var automatically
+# Update yt-dlp at container start (gets latest YouTube fixes)
 EXPOSE 3000
 
-CMD ["node", "app.js"]
+CMD ["/bin/sh", "-c", "pip3 install --break-system-packages --upgrade yt-dlp && yt-dlp --version && node app.js"]
