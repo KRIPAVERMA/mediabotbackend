@@ -66,13 +66,44 @@ app.get("/health", (_req, res) => {
 
 // Email test endpoint (temporary debug)
 app.get("/test-email", async (_req, res) => {
+  const nodemailer = require("nodemailer");
+  const info = {
+    smtp_user: process.env.SMTP_USER ? process.env.SMTP_USER.substring(0, 6) + "..." : "NOT SET",
+    smtp_pass: process.env.SMTP_PASS ? "set (" + process.env.SMTP_PASS.length + " chars)" : "NOT SET",
+    smtp_host: process.env.SMTP_HOST || "smtp-relay.brevo.com",
+    smtp_port: process.env.SMTP_PORT || "587",
+    smtp_from: process.env.SMTP_FROM || "MediaBot <kripaverma410@gmail.com>",
+  };
   try {
-    const { sendVerificationEmail } = require("./utils/email");
-    const result = await sendVerificationEmail("kripaverma410@gmail.com", "999999", "TestUser");
-    res.json({ sent: result, smtp_user: process.env.SMTP_USER ? "set" : "NOT SET", smtp_pass: process.env.SMTP_PASS ? "set" : "NOT SET" });
+    const t = nodemailer.createTransport({
+      host: info.smtp_host,
+      port: parseInt(info.smtp_port, 10),
+      secure: false,
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000,
+    });
+    // Step 1: verify SMTP connection
+    await t.verify();
+    info.verify = "ok";
+    // Step 2: try sending
+    const result = await t.sendMail({
+      from: info.smtp_from,
+      to: "kripaverma410@gmail.com",
+      subject: "MediaBot SMTP Test",
+      text: "If you see this, SMTP works!",
+    });
+    info.sent = true;
+    info.response = result.response;
+    info.accepted = result.accepted;
+    info.rejected = result.rejected;
   } catch (err) {
-    res.json({ sent: false, error: err.message });
+    info.sent = false;
+    info.error = err.message;
+    info.errorCode = err.code || null;
   }
+  res.json(info);
 });
 
 // ── 404 handler ──────────────────────────────────────────────────
