@@ -1,13 +1,17 @@
 /**
- * Download Route
- * Maps POST /api/download to the controller.
+ * Download Routes — Async Job-Based
+ *
+ *   POST /api/download         → start job, returns { jobId }
+ *   GET  /api/download/:id     → poll status { status, progress, error }
+ *   GET  /api/download/:id/file → download the finished file
  */
 
 const express = require("express");
 const router = express.Router();
-const { handleDownload } = require("../controllers/downloadController");
+const { handleDownload, getJobStatus, getJobFile } = require("../controllers/downloadController");
 
-// POST /api/download – accepts { url } and returns an MP3 file
 router.post("/", handleDownload);
+router.get("/:id", getJobStatus);
+router.get("/:id/file", getJobFile);
 
 module.exports = router;

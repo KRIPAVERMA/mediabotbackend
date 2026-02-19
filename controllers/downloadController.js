@@ -1,12 +1,14 @@
 /**
- * Download Controller
- * Handles multi-mode downloads:
- *   youtube-video   → download YouTube video as MP4
- *   youtube-mp3     → extract YouTube audio as MP3
- *   instagram-video → download Instagram reel/post video
- *   instagram-mp3   → extract Instagram audio as MP3
- *   facebook-video  → download Facebook video as MP4
- *   facebook-mp3    → extract Facebook audio as MP3
+ * Download Controller — Async Job-Based Architecture
+ *
+ * Render free tier has a 30-second HTTP timeout. yt-dlp downloads can take
+ * 1-3 minutes, so we use an async pattern:
+ *
+ *   POST /api/download       → validates, queues job, returns { jobId } instantly
+ *   GET  /api/download/:id   → poll job status  { status, progress, ... }
+ *   GET  /api/download/:id/file → stream the finished file to the client
+ *
+ * Jobs live in an in-memory Map (fine for a single-instance free tier).
  */
 
 const { exec } = require("child_process");
@@ -23,17 +25,35 @@ if (!fs.existsSync(DOWNLOADS_DIR)) {
   fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
 }
 
-// Valid modes the API accepts
-const VALID_MODES = ["youtube-video", "youtube-mp3", "instagram-video", "instagram-mp3", "facebook-video", "facebook-mp3"];
+const VALID_MODES = [
+  "youtube-video", "youtube-mp3",
+  "instagram-video", "instagram-mp3",
+  "facebook-video", "facebook-mp3",
+];
 
-/**
- * POST /api/download
- * Body: { url: string, mode: string }
- */
-async function handleDownload(req, res) {
+// ── In-memory job store ─────────────────────────────────────────
+const jobs = new Map();
+
+// Auto-cleanup: delete finished jobs & files older than 10 minutes
+setInterval(() => {
+  const TEN_MIN = 10 * 60 * 1000;
+  for (const [id, job] of jobs) {
+    if (Date.now() - job.createdAt > TEN_MIN) {
+      if (job.filePath) {
+        fs.unlink(job.filePath, () => {});
+      }
+      jobs.delete(id);
+    }
+  }
+}, 60_000);
+
+// ─────────────────────────────────────────────────────────────────
+// POST /api/download  — start a download job
+// ─────────────────────────────────────────────────────────────────
+function handleDownload(req, res) {
   const { url, mode } = req.body;
 
-  // ── 1. Validate mode ─────────────────────────────────────────
+  // 1. Validate mode
   if (!mode || !VALID_MODES.includes(mode)) {
     return res.status(400).json({
       error: `Invalid mode. Choose one of: ${VALID_MODES.join(", ")}`,
@@ -45,18 +65,32 @@ async function handleDownload(req, res) {
     : "facebook";
   const isAudio = mode.endsWith("mp3");
 
-  // ── 2. Validate URL ──────────────────────────────────────────
+  // 2. Validate URL
   const { valid, error } = validateURL(url, expectedPlatform);
   if (!valid) {
     return res.status(400).json({ error });
   }
 
-  const safeURL = sanitizeURL(url.trim());
-  const fileId = uuidv4();
-  const outputTemplate = path.join(DOWNLOADS_DIR, `${fileId}.%(ext)s`);
+  // 3. Create job & return immediately
+  const jobId = uuidv4();
+  const job = {
+    status: "processing",
+    progress: "Starting download…",
+    error: null,
+    filePath: null,
+    fileName: null,
+    format: isAudio ? "MP3" : "MP4",
+    createdAt: Date.now(),
+  };
+  jobs.set(jobId, job);
 
-  // ── 3. Build yt-dlp command ──────────────────────────────────
-  // Common flags: retries, no cert check, Android client (bypasses YouTube bot detection)
+  // Return instantly (within Render's 30 s window)
+  res.json({ jobId });
+
+  // 4. Run yt-dlp in background
+  const safeURL = sanitizeURL(url.trim());
+  const outputTemplate = path.join(DOWNLOADS_DIR, `${jobId}.%(ext)s`);
+
   const commonFlags = [
     '--no-playlist',
     '--retries 3',
@@ -70,96 +104,106 @@ async function handleDownload(req, res) {
 
   let command;
   if (isAudio) {
-    // Extract audio as MP3
     command = `yt-dlp -x --audio-format mp3 ${commonFlags} -o "${outputTemplate}" "${safeURL}"`;
   } else {
-    // Download best video (merge to mp4)
     command = `yt-dlp -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" --merge-output-format mp4 ${commonFlags} -o "${outputTemplate}" "${safeURL}"`;
   }
 
-  try {
-    // ── 4. Execute ──────────────────────────────────────────────
-    await execPromise(command);
+  job.progress = "Downloading…";
 
-    // ── 5. Find the output file ─────────────────────────────────
+  exec(command, { timeout: 300_000, maxBuffer: 50 * 1024 * 1024 }, (execErr, _stdout, stderr) => {
+    if (execErr) {
+      const rawMsg = (stderr || execErr.message || "").toString().toLowerCase();
+      console.error("yt-dlp error:", rawMsg.slice(0, 500));
+      cleanupPartialFiles(jobId);
+
+      if (rawMsg.includes("private") || rawMsg.includes("login") || rawMsg.includes("age-restricted") || rawMsg.includes("sign in")) {
+        job.status = "error";
+        job.error = expectedPlatform === 'instagram'
+          ? 'This Instagram post is private or requires login.'
+          : 'This content is private or age-restricted.';
+      } else if (rawMsg.includes("404") || rawMsg.includes("not found") || rawMsg.includes("unavailable") || rawMsg.includes("deleted")) {
+        job.status = "error";
+        job.error = 'Content not found or deleted.';
+      } else if (rawMsg.includes("429") || rawMsg.includes("too many") || rawMsg.includes("rate limit")) {
+        job.status = "error";
+        job.error = 'Temporarily blocked by platform. Try again in a moment.';
+      } else {
+        job.status = "error";
+        job.error = 'Download failed. Check URL is valid and content is public.';
+      }
+      return;
+    }
+
+    // Find the output file
     const expectedExt = isAudio ? ".mp3" : ".mp4";
-    let outputFile = path.join(DOWNLOADS_DIR, `${fileId}${expectedExt}`);
+    let outputFile = path.join(DOWNLOADS_DIR, `${jobId}${expectedExt}`);
 
-    // Fallback: scan for any file starting with fileId
     if (!fs.existsSync(outputFile)) {
-      const files = fs.readdirSync(DOWNLOADS_DIR).filter((f) => f.startsWith(fileId));
+      const files = fs.readdirSync(DOWNLOADS_DIR).filter(f => f.startsWith(jobId));
       if (files.length > 0) {
         outputFile = path.join(DOWNLOADS_DIR, files[0]);
       } else {
-        return res.status(500).json({ error: "Download completed but output file not found." });
+        job.status = "error";
+        job.error = "Download completed but output file not found.";
+        return;
       }
     }
 
     const ext = path.extname(outputFile);
-    const downloadName = `${fileId}${ext}`;
+    job.filePath = outputFile;
+    job.fileName = `${jobId}${ext}`;
+    job.status = "done";
+    job.progress = "Ready!";
 
-    // ── 5b. Record in download history (if user is authenticated) ─
-    _recordHistory(req, url, mode, expectedPlatform, isAudio ? 'MP3' : 'MP4', downloadName);
+    // Record history
+    _recordHistory(req, url, mode, expectedPlatform, job.format, job.fileName);
+  });
+}
 
-    // ── 6. Stream back to user ──────────────────────────────────
-    res.download(outputFile, downloadName, (err) => {
-      // Cleanup
-      fs.unlink(outputFile, (unlinkErr) => {
-        if (unlinkErr) console.error("Cleanup error:", unlinkErr.message);
-      });
-      if (err && !res.headersSent) {
-        console.error("Send error:", err.message);
-        return res.status(500).json({ error: "Failed to send file." });
-      }
-    });
-  } catch (execErr) {
-    const rawMsg = (execErr.stderr || execErr.message || "").toString();
-    console.error("yt-dlp error:", rawMsg.slice(0, 500));
-    cleanupPartialFiles(fileId);
-
-    // Detect common error types from yt-dlp output
-    const msg = rawMsg.toLowerCase();
-
-    if (msg.includes("private") || msg.includes("login") || msg.includes("age-restricted") || msg.includes("sign in")) {
-      return res.status(403).json({
-        error: expectedPlatform === 'instagram'
-          ? 'This Instagram post is private or requires login. Only public posts/reels are supported.'
-          : `This content is private or age-restricted. Only public content is supported.`,
-      });
-    }
-
-    if (msg.includes("404") || msg.includes("not found") || msg.includes("unavailable") || msg.includes("deleted")) {
-      return res.status(404).json({
-        error: 'This content was not found or has been deleted.',
-      });
-    }
-
-    if (msg.includes("429") || msg.includes("too many") || msg.includes("rate limit")) {
-      return res.status(429).json({
-        error: 'Download temporarily blocked by the platform. Please wait a moment and try again.',
-      });
-    }
-
-    return res.status(500).json({
-      error: 'Download failed. Make sure the URL is valid and the content is public.',
-    });
+// ─────────────────────────────────────────────────────────────────
+// GET /api/download/:id  — poll job status
+// ─────────────────────────────────────────────────────────────────
+function getJobStatus(req, res) {
+  const job = jobs.get(req.params.id);
+  if (!job) {
+    return res.status(404).json({ error: "Job not found or expired." });
   }
+  res.json({
+    status: job.status,
+    progress: job.progress,
+    error: job.error,
+    format: job.format,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────
+// GET /api/download/:id/file  — stream the finished file
+// ─────────────────────────────────────────────────────────────────
+function getJobFile(req, res) {
+  const job = jobs.get(req.params.id);
+  if (!job) {
+    return res.status(404).json({ error: "Job not found or expired." });
+  }
+  if (job.status !== "done" || !job.filePath) {
+    return res.status(400).json({ error: "File not ready yet.", status: job.status });
+  }
+  if (!fs.existsSync(job.filePath)) {
+    return res.status(410).json({ error: "File expired. Start a new download." });
+  }
+
+  res.download(job.filePath, job.fileName, (err) => {
+    if (err && !res.headersSent) {
+      console.error("Send error:", err.message);
+      return res.status(500).json({ error: "Failed to send file." });
+    }
+    // Cleanup after successful send
+    fs.unlink(job.filePath, () => {});
+    jobs.delete(req.params.id);
+  });
 }
 
 // ── Helpers ──────────────────────────────────────────────────────
-
-function execPromise(command, timeoutMs = 300_000) {
-  return new Promise((resolve, reject) => {
-    exec(command, { timeout: timeoutMs, maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
-      if (error) {
-        // Attach stderr to the error object so callers can inspect it
-        error.stderr = stderr || '';
-        return reject(error);
-      }
-      resolve(stdout);
-    });
-  });
-}
 
 function cleanupPartialFiles(fileId) {
   try {
@@ -174,10 +218,6 @@ function cleanupPartialFiles(fileId) {
   }
 }
 
-/**
- * Silently record download in history if user has a valid JWT.
- * Does NOT block or fail the download if no token present.
- */
 function _recordHistory(req, url, mode, platform, format, filename) {
   try {
     const authHeader = req.headers.authorization;
@@ -191,8 +231,8 @@ function _recordHistory(req, url, mode, platform, format, filename) {
       "INSERT INTO download_history (user_id, url, mode, platform, format, filename) VALUES (?, ?, ?, ?, ?, ?)"
     ).run(decoded.userId, url, mode, platformName, format, filename || '');
   } catch {
-    // Silently ignore — don't break the download for auth issues
+    // Silently ignore
   }
 }
 
-module.exports = { handleDownload };
+module.exports = { handleDownload, getJobStatus, getJobFile };
