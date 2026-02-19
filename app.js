@@ -66,15 +66,48 @@ app.get("/health", (_req, res) => {
 
 // Email test endpoint (temporary debug)
 app.get("/test-email", async (_req, res) => {
+  const https = require("https");
   const BREVO_KEY = process.env.BREVO_API_KEY || process.env.SMTP_PASS || "";
   const info = {
     brevo_key: BREVO_KEY ? `set (${BREVO_KEY.length} chars, starts: ${BREVO_KEY.substring(0, 8)}...)` : "NOT SET",
     method: "Brevo HTTP API (not SMTP)",
   };
+
+  // Direct Brevo API call with full error details
+  const payload = JSON.stringify({
+    sender: { name: "MediaBot", email: "kripaverma410@gmail.com" },
+    to: [{ email: "kripaverma410@gmail.com" }],
+    subject: "MediaBot SMTP Test",
+    htmlContent: "<p>If you see this, Brevo HTTP API works!</p>",
+  });
+
   try {
-    const { sendVerificationEmail } = require("./utils/email");
-    const result = await sendVerificationEmail("kripaverma410@gmail.com", "999999", "TestUser");
-    info.sent = result;
+    const result = await new Promise((resolve, reject) => {
+      const req = https.request({
+        hostname: "api.brevo.com",
+        port: 443,
+        path: "/v3/smtp/email",
+        method: "POST",
+        headers: {
+          "accept": "application/json",
+          "api-key": BREVO_KEY,
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(payload),
+        },
+        timeout: 15000,
+      }, (resp) => {
+        let body = "";
+        resp.on("data", (c) => (body += c));
+        resp.on("end", () => resolve({ status: resp.statusCode, body }));
+      });
+      req.on("error", (e) => reject(e));
+      req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
+      req.write(payload);
+      req.end();
+    });
+    info.api_status = result.status;
+    info.api_response = result.body;
+    info.sent = result.status >= 200 && result.status < 300;
   } catch (err) {
     info.sent = false;
     info.error = err.message;
