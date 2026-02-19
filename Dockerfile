@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     curl \
     build-essential \
-    && pip3 install --break-system-packages yt-dlp \
+    && pip3 install --break-system-packages --upgrade yt-dlp \
     && rm -rf /var/lib/apt/lists/*
 
 # Verify yt-dlp & ffmpeg installed

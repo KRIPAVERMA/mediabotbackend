@@ -56,13 +56,25 @@ async function handleDownload(req, res) {
   const outputTemplate = path.join(DOWNLOADS_DIR, `${fileId}.%(ext)s`);
 
   // ── 3. Build yt-dlp command ──────────────────────────────────
+  // Common flags: retries, no cert check, Android client (bypasses YouTube bot detection)
+  const commonFlags = [
+    '--no-playlist',
+    '--retries 3',
+    '--fragment-retries 3',
+    '--no-check-certificates',
+    '--no-warnings',
+    expectedPlatform === 'youtube'
+      ? '--extractor-args "youtube:player_client=android,web"'
+      : '--user-agent "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"',
+  ].join(' ');
+
   let command;
   if (isAudio) {
     // Extract audio as MP3
-    command = `yt-dlp -x --audio-format mp3 --no-playlist -o "${outputTemplate}" "${safeURL}"`;
+    command = `yt-dlp -x --audio-format mp3 ${commonFlags} -o "${outputTemplate}" "${safeURL}"`;
   } else {
     // Download best video (merge to mp4)
-    command = `yt-dlp -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" --merge-output-format mp4 --no-playlist -o "${outputTemplate}" "${safeURL}"`;
+    command = `yt-dlp -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" --merge-output-format mp4 ${commonFlags} -o "${outputTemplate}" "${safeURL}"`;
   }
 
   try {
@@ -101,19 +113,35 @@ async function handleDownload(req, res) {
       }
     });
   } catch (execErr) {
-    console.error("yt-dlp error:", execErr.message);
+    const rawMsg = (execErr.stderr || execErr.message || "").toString();
+    console.error("yt-dlp error:", rawMsg.slice(0, 500));
     cleanupPartialFiles(fileId);
 
-    // Detect common Instagram private-post error
-    const msg = execErr.message || "";
-    if (expectedPlatform === "instagram" && (msg.includes("login") || msg.includes("private") || msg.includes("404"))) {
+    // Detect common error types from yt-dlp output
+    const msg = rawMsg.toLowerCase();
+
+    if (msg.includes("private") || msg.includes("login") || msg.includes("age-restricted") || msg.includes("sign in")) {
       return res.status(403).json({
-        error: "This Instagram post appears to be private or unavailable. Only public posts/reels are supported.",
+        error: expectedPlatform === 'instagram'
+          ? 'This Instagram post is private or requires login. Only public posts/reels are supported.'
+          : `This content is private or age-restricted. Only public content is supported.`,
+      });
+    }
+
+    if (msg.includes("404") || msg.includes("not found") || msg.includes("unavailable") || msg.includes("deleted")) {
+      return res.status(404).json({
+        error: 'This content was not found or has been deleted.',
+      });
+    }
+
+    if (msg.includes("429") || msg.includes("too many") || msg.includes("rate limit")) {
+      return res.status(429).json({
+        error: 'Download temporarily blocked by the platform. Please wait a moment and try again.',
       });
     }
 
     return res.status(500).json({
-      error: "Failed to download or convert. Make sure the URL is valid and the content is public.",
+      error: 'Download failed. Make sure the URL is valid and the content is public.',
     });
   }
 }
@@ -122,8 +150,12 @@ async function handleDownload(req, res) {
 
 function execPromise(command, timeoutMs = 300_000) {
   return new Promise((resolve, reject) => {
-    exec(command, { timeout: timeoutMs }, (error, stdout, stderr) => {
-      if (error) return reject(error);
+    exec(command, { timeout: timeoutMs, maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error) {
+        // Attach stderr to the error object so callers can inspect it
+        error.stderr = stderr || '';
+        return reject(error);
+      }
       resolve(stdout);
     });
   });
