@@ -36,6 +36,9 @@ function getTransporter() {
       user: SMTP_USER,
       pass: SMTP_PASS,
     },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
   });
 
   return transporter;
@@ -80,12 +83,16 @@ async function sendVerificationEmail(toEmail, code, userName) {
   }
 
   try {
-    const info = await t.sendMail({
+    const sendPromise = t.sendMail({
       from: SMTP_FROM,
       to: toEmail,
       subject: `MediaBot – Your verification code is ${code}`,
       html: htmlContent,
     });
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("SMTP timeout after 15s")), 15000)
+    );
+    const info = await Promise.race([sendPromise, timeoutPromise]);
     console.log(`📧 Verification email sent to ${toEmail}`);
     console.log(`   MessageId: ${info.messageId}`);
     console.log(`   Accepted:  ${JSON.stringify(info.accepted)}`);
@@ -94,7 +101,6 @@ async function sendVerificationEmail(toEmail, code, userName) {
     return true;
   } catch (err) {
     console.error("Email send error:", err.message);
-    console.error("Full error:", JSON.stringify(err, null, 2));
     return false;
   }
 }

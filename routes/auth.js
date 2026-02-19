@@ -54,7 +54,8 @@ router.post("/signup", async (req, res) => {
       db.prepare("INSERT INTO email_verifications (user_id, code, expires_at) VALUES (?, ?, ?)")
         .run(existing.id, code, expiresAt);
 
-      await sendVerificationEmail(email, code, name || "");
+      // Fire-and-forget — don't block the response waiting for SMTP
+      sendVerificationEmail(email, code, name || "").catch(err => console.error("Email error:", err));
       return res.json({
         message: "Account exists but isn't verified. A new verification code has been sent.",
         needsVerification: true,
@@ -74,8 +75,8 @@ router.post("/signup", async (req, res) => {
     db.prepare("INSERT INTO email_verifications (user_id, code, expires_at) VALUES (?, ?, ?)")
       .run(userId, code, expiresAt);
 
-    // Send email
-    await sendVerificationEmail(email, code, name || "");
+    // Send email — fire-and-forget so response returns immediately
+    sendVerificationEmail(email, code, name || "").catch(err => console.error("Email error:", err));
 
     res.status(201).json({
       message: "Account created! Check your email for the verification code.",
@@ -191,7 +192,7 @@ router.post("/resend-code", async (req, res) => {
     db.prepare("INSERT INTO email_verifications (user_id, code, expires_at) VALUES (?, ?, ?)")
       .run(user.id, code, expiresAt);
 
-    await sendVerificationEmail(email, code, user.name || "");
+    await sendVerificationEmail(email, code, user.name || "").catch(err => console.error("Email error:", err));
 
     res.json({ message: "A new verification code has been sent to your email." });
   } catch (err) {
