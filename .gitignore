@@ -1,0 +1,11 @@
+node_modules/
+downloads/*.mp3
+downloads/*.webm
+downloads/*.m4a
+downloads/*.mp4
+.env
+db/*.db
+db/*.db-wal
+db/*.db-shm
+*.apk
+mediabot_app/build/

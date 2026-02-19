@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MediaBot — Download Anything</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    /* ═══════════════════════════════════════════════════════════
+       RESET & BASE
+       ═══════════════════════════════════════════════════════════ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:        #0b0d17;
+      --card:      rgba(255,255,255,0.04);
+      --border:    rgba(255,255,255,0.07);
+      --text:      #d4d4d8;
+      --text-dim:  #71717a;
+      --accent:    #a78bfa;
+      --accent2:   #f472b6;
+      --green:     #34d399;
+      --red:       #f87171;
+      --blue:      #60a5fa;
+      --radius:    16px;
+    }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       ANIMATED BACKGROUND
+       ═══════════════════════════════════════════════════════════ */
+    #particles {
+      position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    }
+    .orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(100px);
+      opacity: 0.35;
+      animation: float 18s ease-in-out infinite alternate;
+    }
+    .orb-1 { width:420px;height:420px;background:#7c3aed;top:-10%;left:-8%;animation-delay:0s; }
+    .orb-2 { width:350px;height:350px;background:#ec4899;bottom:-12%;right:-6%;animation-delay:-6s; }
+    .orb-3 { width:280px;height:280px;background:#06b6d4;top:40%;left:50%;animation-delay:-12s; }
+    @keyframes float {
+      0%   { transform: translate(0, 0) scale(1); }
+      50%  { transform: translate(40px, -30px) scale(1.1); }
+      100% { transform: translate(-20px, 20px) scale(0.95); }
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       LAYOUT
+       ═══════════════════════════════════════════════════════════ */
+    .app {
+      position: relative; z-index: 1;
+      display: flex; flex-direction: column;
+      height: 100vh; max-width: 640px;
+      margin: 0 auto;
+    }
+
+    /* ── Header ───────────────────────────────────────────────── */
+    .topbar {
+      display: flex; align-items: center; gap: 12px;
+      padding: 18px 20px 14px;
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(20px);
+    }
+    .topbar .logo {
+      width: 42px; height: 42px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 14px;
+      display: grid; place-items: center;
+      font-size: 1.3rem;
+      box-shadow: 0 0 24px rgba(167,139,250,0.3);
+    }
+    .topbar h1 { font-size: 1.15rem; font-weight: 700; color:#fff; }
+    .topbar .badge {
+      font-size: 0.65rem; font-weight: 600;
+      padding: 2px 8px; border-radius: 20px;
+      background: rgba(52,211,153,0.15); color: var(--green);
+    }
+
+    /* ── Chat Area ────────────────────────────────────────────── */
+    .chat {
+      flex: 1; overflow-y: auto;
+      padding: 20px 16px; display: flex;
+      flex-direction: column; gap: 14px;
+      scroll-behavior: smooth;
+    }
+    .chat::-webkit-scrollbar { width: 4px; }
+    .chat::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+
+    /* ── Messages ─────────────────────────────────────────────── */
+    .msg {
+      max-width: 88%; display: flex; gap: 10px;
+      animation: msgIn 0.35s cubic-bezier(.4,0,.2,1) both;
+    }
+    .msg.bot  { align-self: flex-start; }
+    .msg.user { align-self: flex-end; flex-direction: row-reverse; }
+
+    .msg .avatar {
+      width: 32px; height: 32px; border-radius: 10px;
+      display: grid; place-items: center; font-size: 0.9rem;
+      flex-shrink: 0;
+    }
+    .msg.bot .avatar  { background: linear-gradient(135deg, var(--accent), var(--accent2)); }
+    .msg.user .avatar { background: rgba(255,255,255,0.08); }
+
+    .msg .bubble {
+      padding: 12px 16px; border-radius: var(--radius);
+      font-size: 0.9rem; line-height: 1.55;
+    }
+    .msg.bot .bubble {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-top-left-radius: 4px;
+    }
+    .msg.user .bubble {
+      background: linear-gradient(135deg, rgba(167,139,250,0.18), rgba(244,114,182,0.12));
+      border: 1px solid rgba(167,139,250,0.2);
+      border-top-right-radius: 4px;
+    }
+
+    /* ── Option cards ─────────────────────────────────────────── */
+    .options {
+      display: grid; grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px; margin-top: 6px;
+    }
+    .opt-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px 14px;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.25s;
+      position: relative;
+      overflow: hidden;
+    }
+    .opt-card::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: linear-gradient(135deg, rgba(167,139,250,0.08), rgba(244,114,182,0.06));
+      opacity: 0; transition: opacity 0.3s;
+    }
+    .opt-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .opt-card:hover::before { opacity: 1; }
+    .opt-card:active { transform: scale(0.97); }
+    .opt-card .opt-icon { font-size: 1.6rem; margin-bottom: 6px; position: relative; z-index: 1; }
+    .opt-card .opt-label { font-size: 0.78rem; font-weight: 600; color: #fff; position: relative; z-index: 1; }
+    .opt-card .opt-desc  { font-size: 0.68rem; color: var(--text-dim); margin-top: 3px; position: relative; z-index: 1; }
+
+    /* ── URL Input (shown after choosing mode) ────────────────── */
+    .url-input-area {
+      display: flex; gap: 8px; margin-top: 8px;
+      animation: msgIn 0.35s cubic-bezier(.4,0,.2,1) both;
+    }
+    .url-input-area input {
+      flex: 1; padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: rgba(255,255,255,0.05);
+      color: #fff; font-size: 0.88rem;
+      outline: none; transition: border-color 0.2s;
+      font-family: inherit;
+    }
+    .url-input-area input::placeholder { color: var(--text-dim); }
+    .url-input-area input:focus { border-color: var(--accent); }
+    .url-input-area button {
+      padding: 0 18px; border: none;
+      border-radius: 12px; cursor: pointer;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff; font-weight: 700; font-size: 0.9rem;
+      transition: opacity 0.2s, transform 0.1s;
+      white-space: nowrap;
+    }
+    .url-input-area button:hover { opacity: 0.9; }
+    .url-input-area button:active { transform: scale(0.96); }
+    .url-input-area button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Progress widget ──────────────────────────────────────── */
+    .progress-widget {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px 18px;
+      margin-top: 6px;
+      animation: msgIn 0.35s cubic-bezier(.4,0,.2,1) both;
+    }
+    .progress-widget .pw-header {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 0.85rem; font-weight: 600; color: #fff;
+      margin-bottom: 12px;
+    }
+    .progress-widget .pw-steps {
+      display: flex; gap: 6px;
+    }
+    .pw-step {
+      flex: 1; text-align: center;
+      padding: 10px 4px;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.04);
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      transition: all 0.4s;
+    }
+    .pw-step .pw-icon { font-size: 1rem; display: block; margin-bottom: 3px; }
+    .pw-step.active {
+      color: var(--accent);
+      border-color: rgba(167,139,250,0.25);
+      background: rgba(167,139,250,0.06);
+    }
+    .pw-step.done {
+      color: var(--green);
+      border-color: rgba(52,211,153,0.2);
+      background: rgba(52,211,153,0.05);
+    }
+
+    .pw-bar {
+      height: 4px; border-radius: 2px;
+      background: rgba(255,255,255,0.06);
+      margin-top: 12px; overflow: hidden;
+    }
+    .pw-bar-fill {
+      height: 100%; width: 0%;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      border-radius: 2px;
+      animation: indeterminate 1.6s ease-in-out infinite;
+    }
+
+    /* ── Typing indicator ─────────────────────────────────────── */
+    .typing { display: flex; gap: 4px; padding: 6px 0; }
+    .typing span {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--accent); opacity: 0.4;
+      animation: blink 1.4s ease-in-out infinite;
+    }
+    .typing span:nth-child(2) { animation-delay: 0.2s; }
+    .typing span:nth-child(3) { animation-delay: 0.4s; }
+
+    /* ── Bottom bar (restart) ─────────────────────────────────── */
+    .bottom-bar {
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      backdrop-filter: blur(20px);
+      display: flex; justify-content: center;
+    }
+    .restart-btn {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      padding: 8px 20px;
+      border-radius: 10px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-family: inherit;
+    }
+    .restart-btn:hover { color: #fff; border-color: var(--accent); }
+
+    /* ═══════════════════════════════════════════════════════════
+       KEYFRAMES
+       ═══════════════════════════════════════════════════════════ */
+    @keyframes msgIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes blink {
+      0%, 80%, 100% { opacity: 0.25; }
+      40% { opacity: 1; }
+    }
+    @keyframes indeterminate {
+      0%   { width: 0%; margin-left: 0; }
+      50%  { width: 55%; margin-left: 25%; }
+      100% { width: 0%; margin-left: 100%; }
+    }
+    @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(167,139,250,0.4); } 50% { box-shadow: 0 0 0 10px rgba(167,139,250,0); } }
+
+    /* ═══════════════════════════════════════════════════════════
+       RESPONSIVE
+       ═══════════════════════════════════════════════════════════ */
+    @media (max-width: 500px) {
+      .options { grid-template-columns: 1fr 1fr; }
+      .msg { max-width: 95%; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Animated background orbs -->
+<div id="particles">
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+</div>
+
+<div class="app">
+  <!-- Top bar -->
+  <div class="topbar">
+    <div class="logo">🤖</div>
+    <div>
+      <h1>MediaBot</h1>
+    </div>
+    <span class="badge">● Online</span>
+  </div>
+
+  <!-- Chat messages -->
+  <div class="chat" id="chat"></div>
+
+  <!-- Bottom bar -->
+  <div class="bottom-bar">
+    <button class="restart-btn" onclick="restart()">↻ Start Over</button>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════
+const chat = document.getElementById("chat");
+let currentMode = null; // e.g. "youtube-video"
+let inputCounter = 0;   // unique IDs for each URL input
+
+const MODE_META = {
+  "youtube-video":    { icon: "🎬", label: "YouTube Video",  platform: "YouTube",   format: "MP4" },
+  "youtube-mp3":      { icon: "🎵", label: "YouTube → MP3",   platform: "YouTube",   format: "MP3" },
+  "instagram-video":  { icon: "📸", label: "Instagram Reel",  platform: "Instagram", format: "MP4" },
+  "instagram-mp3":    { icon: "🎧", label: "Instagram → MP3", platform: "Instagram", format: "MP3" },
+  "facebook-video":   { icon: "📘", label: "Facebook Video",  platform: "Facebook",  format: "MP4" },
+  "facebook-mp3":     { icon: "🔊", label: "Facebook → MP3",  platform: "Facebook",  format: "MP3" },
+};
+
+// ═══════════════════════════════════════════════════════════════
+// CHAT HELPERS
+// ═══════════════════════════════════════════════════════════════
+function scrollBottom() {
+  requestAnimationFrame(() => chat.scrollTop = chat.scrollHeight);
+}
+
+function addBotMsg(html, extra = "") {
+  const div = document.createElement("div");
+  div.className = "msg bot";
+  div.innerHTML = `
+    <div class="avatar">🤖</div>
+    <div>
+      <div class="bubble">${html}</div>
+      ${extra}
+    </div>`;
+  chat.appendChild(div);
+  scrollBottom();
+  return div;
+}
+
+function addUserMsg(text) {
+  const div = document.createElement("div");
+  div.className = "msg user";
+  div.innerHTML = `
+    <div class="avatar">😎</div>
+    <div class="bubble">${text}</div>`;
+  chat.appendChild(div);
+  scrollBottom();
+}
+
+function showTyping() {
+  const div = addBotMsg('<div class="typing"><span></span><span></span><span></span></div>');
+  div.id = "typing";
+  return div;
+}
+function hideTyping() {
+  const t = document.getElementById("typing");
+  if (t) t.remove();
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ═══════════════════════════════════════════════════════════════
+// FLOW: GREETING → CHOOSE MODE → PASTE URL → DOWNLOAD
+// ═══════════════════════════════════════════════════════════════
+async function startConversation() {
+  await sleep(500);
+  showTyping();
+  await sleep(800);
+  hideTyping();
+
+  addBotMsg(
+    `Hey there! 👋 I'm <strong>MediaBot</strong>.<br>
+     I can download videos & extract audio from <strong>YouTube</strong>, <strong>Instagram</strong> & <strong>Facebook</strong>.<br><br>
+     What would you like to do?`,
+    buildOptions()
+  );
+}
+
+function buildOptions() {
+  return `
+  <div class="options">
+    <div class="opt-card" onclick="chooseMode('youtube-video')">
+      <div class="opt-icon">🎬</div>
+      <div class="opt-label">YouTube Video</div>
+      <div class="opt-desc">Download as MP4</div>
+    </div>
+    <div class="opt-card" onclick="chooseMode('youtube-mp3')">
+      <div class="opt-icon">🎵</div>
+      <div class="opt-label">YouTube → MP3</div>
+      <div class="opt-desc">Extract audio</div>
+    </div>
+    <div class="opt-card" onclick="chooseMode('instagram-video')">
+      <div class="opt-icon">📸</div>
+      <div class="opt-label">Instagram Reel</div>
+      <div class="opt-desc">Download video</div>
+    </div>
+    <div class="opt-card" onclick="chooseMode('instagram-mp3')">
+      <div class="opt-icon">🎧</div>
+      <div class="opt-label">Instagram → MP3</div>
+      <div class="opt-desc">Extract audio</div>
+    </div>
+    <div class="opt-card" onclick="chooseMode('facebook-video')">
+      <div class="opt-icon">📘</div>
+      <div class="opt-label">Facebook Video</div>
+      <div class="opt-desc">Download as MP4</div>
+    </div>
+    <div class="opt-card" onclick="chooseMode('facebook-mp3')">
+      <div class="opt-icon">🔊</div>
+      <div class="opt-label">Facebook → MP3</div>
+      <div class="opt-desc">Extract audio</div>
+    </div>
+  </div>`;
+}
+
+async function chooseMode(mode) {
+  currentMode = mode;
+  const meta = MODE_META[mode];
+
+  // Disable any previous input areas to avoid duplicate-ID issues
+  document.querySelectorAll('.url-input-area').forEach(el => {
+    el.querySelectorAll('input, button').forEach(c => c.disabled = true);
+    el.style.opacity = '0.35';
+    el.style.pointerEvents = 'none';
+  });
+  // Also disable previous option cards
+  document.querySelectorAll('.options').forEach(el => {
+    el.style.pointerEvents = 'none';
+    el.style.opacity = '0.35';
+  });
+
+  inputCounter++;
+  const inputId = `urlInput_${inputCounter}`;
+  const btnId   = `goBtn_${inputCounter}`;
+  const areaId  = `urlArea_${inputCounter}`;
+
+  addUserMsg(`${meta.icon} ${meta.label}`);
+
+  await sleep(400);
+  showTyping();
+  await sleep(600);
+  hideTyping();
+
+  const placeholder = meta.platform === "YouTube"
+    ? "https://www.youtube.com/watch?v=..."
+    : meta.platform === "Instagram"
+    ? "https://www.instagram.com/reel/..."
+    : "https://www.facebook.com/watch/...";
+
+  addBotMsg(
+    `Great choice! 🔥 Paste the <strong>${meta.platform}</strong> link below and hit <strong>Go</strong>.` +
+    (meta.platform !== "YouTube" ? "<br><em style='color:var(--text-dim);font-size:0.78rem;'>⚠ Only public posts/reels/videos are supported.</em>" : ""),
+    `<div class="url-input-area" id="${areaId}">
+       <input type="text" id="${inputId}" placeholder="${placeholder}" />
+       <button id="${btnId}" onclick="submitURL('${inputId}','${btnId}')">Go →</button>
+     </div>`
+  );
+
+  // Allow Enter key
+  await sleep(100);
+  const inp = document.getElementById(inputId);
+  if (inp) {
+    inp.focus();
+    inp.addEventListener("keydown", e => { if (e.key === "Enter") submitURL(inputId, btnId); });
+  }
+}
+
+async function submitURL(inputId, btnId) {
+  const inp = document.getElementById(inputId);
+  const btn = document.getElementById(btnId);
+  if (!inp || !btn) return;
+
+  const url = inp.value.trim();
+  if (!url) return;
+
+  // Disable input
+  inp.disabled = true;
+  btn.disabled = true;
+
+  addUserMsg(url);
+
+  await sleep(300);
+
+  const meta = MODE_META[currentMode];
+
+  // Show progress widget
+  const progressHTML = `
+    <div class="progress-widget" id="progressWidget">
+      <div class="pw-header"><span style="animation:pulse 2s infinite;display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);"></span> Processing…</div>
+      <div class="pw-steps">
+        <div class="pw-step active" id="ps1"><span class="pw-icon">🔗</span>Validating</div>
+        <div class="pw-step" id="ps2"><span class="pw-icon">📥</span>Downloading</div>
+        <div class="pw-step" id="ps3"><span class="pw-icon">🔄</span>Converting</div>
+        <div class="pw-step" id="ps4"><span class="pw-icon">✅</span>Done</div>
+      </div>
+      <div class="pw-bar"><div class="pw-bar-fill"></div></div>
+    </div>`;
+  addBotMsg(`Working on your <strong>${meta.label}</strong> request…`, progressHTML);
+
+  // Animate steps while we fetch
+  await sleep(600);
+  setStep(2);
+
+  try {
+    const response = await fetch("/api/download", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, mode: currentMode }),
+    });
+
+    if (!response.ok) {
+      const data = await response.json();
+      throw new Error(data.error || "Something went wrong.");
+    }
+
+    setStep(3);
+    await sleep(500);
+
+    const blob = await response.blob();
+    const blobURL = URL.createObjectURL(blob);
+
+    // Determine filename
+    const disp = response.headers.get("Content-Disposition");
+    let filename = `download.${meta.format.toLowerCase()}`;
+    if (disp) {
+      const m = disp.match(/filename="?([^";\n]+)"?/);
+      if (m) filename = m[1];
+    }
+
+    // Trigger browser download
+    const a = document.createElement("a");
+    a.href = blobURL;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(blobURL);
+
+    setStep(4);
+    removeProgressBar();
+
+    await sleep(400);
+    addBotMsg(`✅ <strong>Done!</strong> Your ${meta.format} is downloading now.<br><br>Want to download something else?`,
+      buildOptions()
+    );
+
+  } catch (err) {
+    removeProgressBar();
+    await sleep(200);
+    addBotMsg(`❌ <strong>Error:</strong> ${err.message}<br><br>Let's try again — pick an option:`, buildOptions());
+  }
+}
+
+function setStep(n) {
+  for (let i = 1; i <= 4; i++) {
+    const el = document.getElementById(`ps${i}`);
+    if (!el) continue;
+    el.classList.remove("active", "done");
+    if (i < n)  el.classList.add("done");
+    if (i === n) el.classList.add("active");
+  }
+}
+function removeProgressBar() {
+  const w = document.getElementById("progressWidget");
+  if (w) {
+    const bar = w.querySelector(".pw-bar");
+    if (bar) bar.style.display = "none";
+    const hdr = w.querySelector(".pw-header");
+    if (hdr) hdr.style.display = "none";
+  }
+}
+
+function restart() {
+  chat.innerHTML = "";
+  currentMode = null;
+  startConversation();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// BOOT
+// ═══════════════════════════════════════════════════════════════
+startConversation();
+</script>
+</body>
+</html>

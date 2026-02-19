@@ -1,0 +1,226 @@
+Project Title: Video Link to MP3 Converter Bot
+1️⃣ Problem Statement
+
+Build a backend-based bot/service that:
+
+Accepts a public YouTube video link
+
+Downloads the video
+
+Extracts audio
+
+Converts it into MP3 format
+
+Returns the MP3 file for download
+
+The system should be built using Node.js and Express and should work via REST API.
+
+⚠️ Only support YouTube public links. Do NOT support Instagram scraping due to platform restrictions.
+
+2️⃣ Functional Requirements
+
+The system must:
+
+Accept POST request with:
+
+{
+  "url": "YouTube video URL"
+}
+
+
+Validate:
+
+URL exists
+
+URL is from youtube.com or youtu.be
+
+Download the video using yt-dlp
+
+Extract audio using ffmpeg
+
+Convert to .mp3
+
+Store the file temporarily in /downloads
+
+Return:
+
+Either the MP3 file directly
+
+Or a downloadable file URL
+
+Handle errors properly:
+
+Invalid URL
+
+Download failure
+
+Conversion failure
+
+3️⃣ Non-Functional Requirements
+
+Clean folder structure
+
+Proper error handling
+
+Use async/await where possible
+
+Do not block the server
+
+Temporary files should auto-delete after sending
+
+4️⃣ Tech Stack
+
+Backend:
+
+Node.js
+
+Express.js
+
+child_process (to execute yt-dlp)
+
+fs module
+
+cors
+
+System Dependencies:
+
+yt-dlp
+
+ffmpeg
+
+Deployment Target:
+
+Render / Railway / VPS (not Vercel)
+
+5️⃣ Folder Structure
+video-mp3-bot/
+│
+├── downloads/
+├── routes/
+│   └── download.js
+├── controllers/
+│   └── downloadController.js
+├── utils/
+│   └── validator.js
+├── app.js
+├── package.json
+└── PROJECT_INSTRUCTIONS.md
+
+6️⃣ API Design
+POST /api/download
+
+Request Body:
+
+{
+  "url": "https://youtube.com/..."
+}
+
+
+Success Response:
+
+Return MP3 file
+OR
+
+{
+  "message": "Success",
+  "file": "download_link"
+}
+
+
+Error Response:
+
+{
+  "error": "Invalid YouTube URL"
+}
+
+7️⃣ Implementation Steps
+Step 1: Initialize Project
+
+Create Node project
+
+Install express, cors
+
+Step 2: Create Express Server
+
+Setup middleware
+
+Enable JSON parsing
+
+Step 3: URL Validation Logic
+
+Check if URL contains:
+
+youtube.com
+
+youtu.be
+
+Step 4: Download & Convert
+
+Use command:
+
+yt-dlp -x --audio-format mp3 "<video_url>" -o "downloads/%(title)s.%(ext)s"
+
+
+Execute using child_process.exec
+
+Wait for completion
+
+Return file
+
+Step 5: Send File to User
+
+Use:
+
+res.download(filePath)
+
+Step 6: Delete File After Sending
+
+Use fs.unlink
+
+8️⃣ Security Rules
+
+Only allow YouTube URLs
+
+Prevent command injection
+
+Sanitize input
+
+Limit request size
+
+Add rate limiting (optional)
+
+9️⃣ Future Improvements (Optional)
+
+Add frontend UI
+
+Add progress indicator
+
+Store file in AWS S3
+
+Add queue system
+
+Support video format download
+
+Add transcript extraction instead of download (legal-safe alternative)
+
+🔟 Constraints
+
+Do NOT use Instagram scraping
+
+Do NOT violate platform terms
+
+Code must be modular
+
+Follow MVC pattern
+
+1️⃣1️⃣ Deliverables Expected From Agent
+
+Complete backend code
+
+Working API
+
+Proper folder structure
+
+Clear comments in code
+
+README with setup instructions
