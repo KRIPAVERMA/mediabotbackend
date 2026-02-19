@@ -53,7 +53,15 @@ app.use("/api/history", historyRoute);
 
 // Health-check endpoint
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", message: "Video-to-MP3 Bot is running." });
+  let dbStatus = "unknown";
+  try {
+    const db = require("./db/database");
+    const row = db.prepare("SELECT COUNT(*) AS cnt FROM users").get();
+    dbStatus = `ok (${row.cnt} users)`;
+  } catch (err) {
+    dbStatus = `error: ${err.message}`;
+  }
+  res.json({ status: "ok", message: "Video-to-MP3 Bot is running.", db: dbStatus });
 });
 
 // ── 404 handler ──────────────────────────────────────────────────
@@ -64,7 +72,7 @@ app.use((_req, res) => {
 // ── Global error handler ─────────────────────────────────────────
 app.use((err, _req, res, _next) => {
   console.error("Unhandled error:", err);
-  res.status(500).json({ error: "Internal server error." });
+  res.status(500).json({ error: "Internal server error.", detail: err.message || String(err) });
 });
 
 // ── Start server ─────────────────────────────────────────────────
