@@ -85,8 +85,7 @@ function handleDownload(req, res) {
   const outputTemplate = path.join(DOWNLOADS_DIR, `${jobId}.%(ext)s`);
 
   const ytFlags = [
-    '--extractor-args "youtube:player_client=ios,web"',
-    '--user-agent "com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)"',
+    '--extractor-args "youtube:player_client=web_creator,mweb,web"',
   ].join(" ");
 
   const socialFlags = [
@@ -106,8 +105,8 @@ function handleDownload(req, res) {
   ].join(" ");
 
   const command = isAudio
-    ? `yt-dlp -x --audio-format mp3 ${commonFlags} -o "${outputTemplate}" "${safeURL}"`
-    : `yt-dlp -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" --merge-output-format mp4 ${commonFlags} -o "${outputTemplate}" "${safeURL}"`;
+    ? `yt-dlp -x --audio-format mp3 -f "bestaudio/best" ${commonFlags} -o "${outputTemplate}" "${safeURL}"`
+    : `yt-dlp -f "bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b" --merge-output-format mp4 ${commonFlags} -o "${outputTemplate}" "${safeURL}"`;
 
   job.progress = "Downloading…";
   console.log(`[JOB ${jobId}] CMD: ${command.slice(0, 200)}…`);
