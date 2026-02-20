@@ -66,6 +66,60 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok", message: "Video-to-MP3 Bot is running.", db: dbStatus });
 });
 
+// System dependencies check endpoint
+app.get("/check-dependencies", async (_req, res) => {
+  const { exec } = require("child_process");
+  const { promisify } = require("util");
+  const execAsync = promisify(exec);
+  
+  const results = {
+    ytdlp: { installed: false, version: null, error: null },
+    ffmpeg: { installed: false, version: null, error: null },
+    node: { version: process.version },
+    platform: process.platform,
+    downloadsDir: require("path").join(__dirname, "downloads")
+  };
+
+  try {
+    const ytdlp = await execAsync("yt-dlp --version");
+    results.ytdlp.installed = true;
+    results.ytdlp.version = ytdlp.stdout.trim();
+  } catch (err) {
+    results.ytdlp.error = err.message;
+  }
+
+  try {
+    const ffmpeg = await execAsync("ffmpeg -version");
+    const versionMatch = ffmpeg.stdout.match(/ffmpeg version ([^\s]+)/);
+    results.ffmpeg.installed = true;
+    results.ffmpeg.version = versionMatch ? versionMatch[1] : "unknown";
+  } catch (err) {
+    results.ffmpeg.error = err.message;
+  }
+
+  // Check downloads directory
+  const fs = require("fs");
+  const downloadsPath = results.downloadsDir;
+  results.downloadsDir = {
+    path: downloadsPath,
+    exists: fs.existsSync(downloadsPath),
+    writable: false
+  };
+  
+  if (results.downloadsDir.exists) {
+    try {
+      const testFile = require("path").join(downloadsPath, ".writetest");
+      fs.writeFileSync(testFile, "test");
+      fs.unlinkSync(testFile);
+      results.downloadsDir.writable = true;
+    } catch (err) {
+      results.downloadsDir.writeError = err.message;
+    }
+  }
+
+  res.json(results);
+});
+
 // Email test endpoint (temporary debug)
 app.get("/test-email", async (_req, res) => {
   const https = require("https");
