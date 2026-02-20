@@ -5,7 +5,7 @@ import 'package:path_provider/path_provider.dart';
 import 'auth_service.dart';
 
 class ApiService {
-  static String baseUrl = 'http://172.17.85.200:3000';
+  static String baseUrl = 'https://mediabotkripa.sallytion.qzz.io';
 
   /// Downloads a file directly from the local server.
   /// POST /api/download with url & mode → server runs yt-dlp and streams the file back.
