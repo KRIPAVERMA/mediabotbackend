@@ -5,6 +5,8 @@
  *   POST /api/download  → accepts a YouTube URL, returns an MP3 file.
  */
 
+require("dotenv").config();
+
 const express = require("express");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");

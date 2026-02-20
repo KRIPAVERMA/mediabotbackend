@@ -2,21 +2,26 @@ import 'package:flutter/material.dart';
 import 'package:open_file/open_file.dart';
 import '../models/chat_models.dart';
 import '../services/api_service.dart';
+import '../services/auth_service.dart';
 import '../widgets/animated_background.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/option_cards.dart';
 import '../widgets/progress_steps.dart';
 import '../widgets/typing_indicator.dart';
 import 'settings_sheet.dart';
+import 'history_screen.dart';
+import 'about_screen.dart';
 
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key});
+  final VoidCallback onLogout;
+  const ChatScreen({super.key, required this.onLogout});
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
 class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final ScrollController _scroll = ScrollController();
   final TextEditingController _urlCtrl = TextEditingController();
 
@@ -49,9 +54,11 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     await Future.delayed(const Duration(milliseconds: 800));
     setState(() {
       _showTyping = false;
+      final userName = AuthService.currentUser?['name'] ?? '';
+      final greeting = userName.isNotEmpty ? 'Hey $userName! 👋' : 'Hey there! 👋';
       _items.add(_ChatItem.text(
         MsgSender.bot,
-        "Hey there! 👋 I'm MediaBot.\nI can download videos & extract audio from YouTube, Instagram & Facebook.\n\nWhat would you like to do?",
+        "$greeting I'm MediaBot.\nI can download videos & extract audio from YouTube, Instagram & Facebook.\n\nWhat would you like to do?",
       ));
       _items.add(_ChatItem.options(disabled: false));
     });
@@ -135,6 +142,8 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       setState(() => _progressStep = 4);
       await Future.delayed(const Duration(milliseconds: 500));
 
+      // Backend automatically records download history via JWT token
+
       setState(() {
         _progressStep = 0;
         _items.add(_ChatItem.text(
@@ -191,6 +200,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      key: _scaffoldKey,
+      drawer: _buildProfileDrawer(),
+      drawerEdgeDragWidth: 40,
       body: Stack(
         children: [
           const AnimatedBackground(),
@@ -210,7 +222,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
   Widget _buildTopBar() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(color: Colors.white.withValues(alpha: 0.07)),
@@ -218,61 +230,240 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       ),
       child: Row(
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              gradient: const LinearGradient(
-                colors: [Color(0xFFA78BFA), Color(0xFFF472B6)],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFFA78BFA).withValues(alpha: 0.3),
-                  blurRadius: 16,
-                ),
-              ],
-            ),
-            alignment: Alignment.center,
-            child: const Text('🤖', style: TextStyle(fontSize: 20)),
+          // Hamburger menu
+          IconButton(
+            icon: Icon(Icons.menu, size: 24, color: Colors.white.withValues(alpha: 0.8)),
+            tooltip: 'Menu',
+            onPressed: () => _scaffoldKey.currentState?.openDrawer(),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 6),
+          // App icon
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Image.asset(
+              'assets/icon/app_icon.png',
+              width: 36,
+              height: 36,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFFA78BFA), Color(0xFFF472B6)],
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: const Text('🤖', style: TextStyle(fontSize: 18)),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
           const Expanded(
             child: Text(
               'MediaBot',
               style: TextStyle(
                   fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: const Color(0xFF34D399).withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: const Text(
-              '● Online',
-              style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF34D399)),
-            ),
-          ),
-          const SizedBox(width: 8),
           IconButton(
-            icon: Icon(Icons.settings,
-                size: 20, color: Colors.white.withValues(alpha: 0.5)),
-            onPressed: () => showModalBottomSheet(
-              context: context,
-              backgroundColor: const Color(0xFF1A1D2E),
-              shape: const RoundedRectangleBorder(
-                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-              ),
-              builder: (_) => const SettingsSheet(),
-            ),
+            icon: Icon(Icons.logout,
+                size: 22, color: Colors.white.withValues(alpha: 0.5)),
+            tooltip: 'Sign Out',
+            onPressed: () async {
+              await AuthService.logout();
+              widget.onLogout();
+            },
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildProfileDrawer() {
+    final user = AuthService.currentUser;
+    final name = user?['name'] ?? '';
+    final email = user?['email'] ?? '';
+    final isLoggedIn = AuthService.isLoggedIn;
+
+    // Initials for avatar
+    String initials = '';
+    if (name.isNotEmpty) {
+      final parts = name.trim().split(' ');
+      initials = parts.map((p) => p.isNotEmpty ? p[0].toUpperCase() : '').take(2).join();
+    } else if (email.isNotEmpty) {
+      initials = email[0].toUpperCase();
+    }
+
+    return Drawer(
+      backgroundColor: const Color(0xFF12152B),
+      child: SafeArea(
+        child: Column(
+          children: [
+            // Profile header
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(20, 28, 20, 24),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFF1E2140), Color(0xFF12152B)],
+                ),
+                border: Border(
+                  bottom: BorderSide(color: Color(0xFF2A2D45), width: 1),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Avatar
+                  Container(
+                    width: 64,
+                    height: 64,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFFA78BFA), Color(0xFFF472B6)],
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFFA78BFA).withValues(alpha: 0.3),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      initials.isNotEmpty ? initials : '?',
+                      style: const TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  // Name
+                  if (name.isNotEmpty)
+                    Text(
+                      name,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  if (name.isNotEmpty) const SizedBox(height: 4),
+                  // Email
+                  if (email.isNotEmpty)
+                    Text(
+                      email,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.white.withValues(alpha: 0.5),
+                      ),
+                    ),
+                  const SizedBox(height: 10),
+                  // Status badge
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: isLoggedIn
+                          ? const Color(0xFF34D399).withValues(alpha: 0.15)
+                          : Colors.redAccent.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: isLoggedIn
+                            ? const Color(0xFF34D399).withValues(alpha: 0.4)
+                            : Colors.redAccent.withValues(alpha: 0.4),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          isLoggedIn ? Icons.check_circle : Icons.cancel,
+                          size: 12,
+                          color: isLoggedIn ? const Color(0xFF34D399) : Colors.redAccent,
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          isLoggedIn ? 'Logged In' : 'Not Logged In',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: isLoggedIn ? const Color(0xFF34D399) : Colors.redAccent,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            // Menu items
+            _drawerItem(Icons.history, 'Download History', () {
+              Navigator.pop(context); // close drawer
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const HistoryScreen()));
+            }),
+            _drawerItem(Icons.settings, 'Settings', () {
+              Navigator.pop(context);
+              showModalBottomSheet(
+                context: context,
+                backgroundColor: const Color(0xFF1A1D2E),
+                shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                ),
+                builder: (_) => const SettingsSheet(),
+              );
+            }),
+            _drawerItem(Icons.info_outline_rounded, 'About', () {
+              Navigator.pop(context);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutScreen()));
+            }),
+            const Spacer(),
+            // Sign out
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    Navigator.pop(context);
+                    await AuthService.logout();
+                    widget.onLogout();
+                  },
+                  icon: const Icon(Icons.logout, size: 18),
+                  label: const Text('Sign Out'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.redAccent,
+                    side: BorderSide(color: Colors.redAccent.withValues(alpha: 0.4)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _drawerItem(IconData icon, String label, VoidCallback onTap) {
+    return ListTile(
+      leading: Icon(icon, size: 20, color: const Color(0xFFA78BFA)),
+      title: Text(label, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500)),
+      onTap: onTap,
+      dense: true,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      hoverColor: Colors.white.withValues(alpha: 0.05),
     );
   }
 

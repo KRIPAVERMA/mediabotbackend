@@ -9,3 +9,9 @@ db/*.db-wal
 db/*.db-shm
 *.apk
 mediabot_app/build/
+mediabot_app/.dart_tool/
+mediabot_app/.idea/
+mediabot_app/android/.gradle/
+mediabot_app/android/app/build/
+mediabot_app/pubspec.lock
+test_smtp.js

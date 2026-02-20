@@ -1,0 +1,424 @@
+import 'package:flutter/material.dart';
+import 'dart:io';
+import 'package:open_file/open_file.dart';
+import '../services/auth_service.dart';
+import '../widgets/animated_background.dart';
+
+class HistoryScreen extends StatefulWidget {
+  const HistoryScreen({super.key});
+
+  @override
+  State<HistoryScreen> createState() => _HistoryScreenState();
+}
+
+class _HistoryScreenState extends State<HistoryScreen> {
+  List<dynamic> _history = [];
+  Map<String, dynamic>? _stats;
+  bool _loading = true;
+  bool _isFetching = false;
+  int _page = 1;
+  int _totalPages = 1;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    // Prevent overlapping requests (rapid refresh clicks)
+    if (_isFetching) return;
+    _isFetching = true;
+
+    if (mounted) setState(() => _loading = true);
+    try {
+      if (!AuthService.isLoggedIn) {
+        if (mounted) {
+          setState(() {
+            _history = [];
+            _stats = null;
+            _loading = false;
+          });
+        }
+        _isFetching = false;
+        return;
+      }
+
+      final results = await Future.wait([
+        AuthService.getHistory(page: _page),
+        AuthService.getStats(),
+      ]);
+
+      final histResult = results[0];
+      final statsResult = results[1];
+
+      if (mounted) {
+        setState(() {
+          // Always reset based on server response
+          if (histResult['success'] == true) {
+            _history = histResult['history'] ?? [];
+            final pagination = histResult['pagination'];
+            if (pagination != null) {
+              _totalPages = pagination['pages'] ?? 1;
+              _page = pagination['page'] ?? 1;
+            } else {
+              _totalPages = 1;
+            }
+          } else {
+            _history = [];
+            _totalPages = 1;
+          }
+          
+          if (statsResult['success'] == true && statsResult['stats'] != null) {
+            _stats = statsResult['stats'];
+          } else {
+            _stats = null;
+          }
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _history = [];
+          _stats = null;
+          _loading = false;
+        });
+      }
+    } finally {
+      _isFetching = false;
+    }
+  }
+
+  Future<void> _deleteItem(int id) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1D2E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Delete?', style: TextStyle(color: Colors.white)),
+        content: const Text('Remove this from your history?', style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await AuthService.deleteHistoryItem(id);
+      _loadData();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Stack(
+        children: [
+          const AnimatedBackground(),
+          SafeArea(
+            child: Column(
+              children: [
+                _buildAppBar(),
+                if (_stats != null) _buildStats(),
+                Expanded(child: _loading ? _buildLoading() : _buildHistoryList()),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAppBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.07))),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new, size: 18, color: Colors.white70),
+            onPressed: () => Navigator.pop(context),
+          ),
+          const SizedBox(width: 4),
+          const Text('📋', style: TextStyle(fontSize: 20)),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text('Download History',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.white)),
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh, size: 20, color: Colors.white54),
+            onPressed: _loadData,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStats() {
+    final s = _stats!;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _statChip('Total', '${s['totalDownloads'] ?? 0}', const Color(0xFFA78BFA)),
+          _statChip('Video', '${s['videoDownloads'] ?? 0}', const Color(0xFF60A5FA)),
+          _statChip('Audio', '${s['audioDownloads'] ?? 0}', const Color(0xFFF472B6)),
+        ],
+      ),
+    );
+  }
+
+  Widget _statChip(String label, String value, Color color) {
+    return Column(
+      children: [
+        Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: color)),
+        const SizedBox(height: 2),
+        Text(label, style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.5))),
+      ],
+    );
+  }
+
+  Widget _buildLoading() {
+    return const Center(child: CircularProgressIndicator(color: Color(0xFFA78BFA)));
+  }
+
+  Widget _buildHistoryList() {
+    if (_history.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('📭', style: TextStyle(fontSize: 48)),
+            const SizedBox(height: 12),
+            Text('No downloads yet',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white.withValues(alpha: 0.5))),
+            const SizedBox(height: 4),
+            Text('Your download history will appear here',
+                style: TextStyle(fontSize: 13, color: Colors.white.withValues(alpha: 0.3))),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            itemCount: _history.length,
+            itemBuilder: (context, index) => _buildHistoryItem(_history[index]),
+          ),
+        ),
+        if (_totalPages > 1) _buildPagination(),
+      ],
+    );
+  }
+
+  Widget _buildHistoryItem(Map<String, dynamic> item) {
+    final platform = item['platform'] ?? '';
+    final format = item['format'] ?? '';
+    final url = item['url'] ?? '';
+    final createdAt = item['created_at'] ?? '';
+    final id = item['id'];
+
+    String icon = '🎬';
+    if (platform == 'YouTube') icon = format == 'MP3' ? '🎵' : '🎬';
+    if (platform == 'Instagram') icon = format == 'MP3' ? '🎧' : '📸';
+    if (platform == 'Facebook') icon = format == 'MP3' ? '🔊' : '📘';
+
+    Color platformColor = const Color(0xFFA78BFA);
+    if (platform == 'YouTube') platformColor = const Color(0xFFEF4444);
+    if (platform == 'Instagram') platformColor = const Color(0xFFF472B6);
+    if (platform == 'Facebook') platformColor = const Color(0xFF60A5FA);
+
+    // Format the date as real local date & time
+    String dateStr = '';
+    try {
+      DateTime dt;
+      if (createdAt is String) {
+        // Parse the datetime string; DateTime.parse handles 'Z' suffix automatically
+        dt = DateTime.parse(createdAt);
+        // Convert UTC to local; leave local times as-is
+        if (dt.isUtc) dt = dt.toLocal();
+      } else {
+        dateStr = createdAt.toString();
+        dt = DateTime.now(); // fallback
+      }
+      final now = DateTime.now();
+      final diff = now.difference(dt);
+
+      final hourPad = dt.hour.toString().padLeft(2, '0');
+      final minutePad = dt.minute.toString().padLeft(2, '0');
+      final timeStr = '$hourPad:$minutePad';
+
+      final day = dt.day.toString().padLeft(2, '0');
+      final month = dt.month.toString().padLeft(2, '0');
+
+      if (dt.year == now.year && dt.month == now.month && dt.day == now.day) {
+        dateStr = 'Today  $timeStr';
+      } else if (diff.inDays == 1 || (dt.day == now.day - 1 && dt.month == now.month)) {
+        dateStr = 'Yesterday  $timeStr';
+      } else {
+        dateStr = '$day/$month/${dt.year}  $timeStr';
+      }
+    } catch (_) {
+      dateStr = createdAt.toString();
+    }
+
+    // Truncate URL for display
+    String displayUrl = url;
+    if (displayUrl.length > 50) {
+      displayUrl = '${displayUrl.substring(0, 50)}...';
+    }
+
+    return GestureDetector(
+      onTap: () => _openDownloadedFile(item),
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+        ),
+        child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        leading: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: platformColor.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          alignment: Alignment.center,
+          child: Text(icon, style: const TextStyle(fontSize: 22)),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: platformColor.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(platform, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: platformColor)),
+            ),
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(format, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white.withValues(alpha: 0.6))),
+            ),
+          ],
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(displayUrl, style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.4)), maxLines: 1, overflow: TextOverflow.ellipsis),
+              const SizedBox(height: 3),
+              Text(dateStr, style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.3))),
+            ],
+          ),
+        ),
+        trailing: IconButton(
+          icon: Icon(Icons.delete_outline, size: 18, color: Colors.white.withValues(alpha: 0.3)),
+          onPressed: () => _deleteItem(id),
+        ),
+      ),
+      ),
+    );
+  }
+
+  Future<void> _openDownloadedFile(Map<String, dynamic> item) async {
+    final filename = item['filename'] ?? '';
+    final storedPath = item['filePath'] ?? '';
+
+    if (filename.isEmpty && storedPath.isEmpty) {
+      _showSnack('File info not available');
+      return;
+    }
+
+    // Prefer the stored full path (local history), fall back to Download folder
+    String filePath = storedPath;
+    if (filePath.isEmpty || !await File(filePath).exists()) {
+      final downloadDir = Directory('/storage/emulated/0/Download');
+      filePath = '${downloadDir.path}/$filename';
+    }
+
+    if (!await File(filePath).exists()) {
+      _showSnack('File not found: $filename');
+      return;
+    }
+
+    try {
+      final result = await OpenFile.open(filePath);
+      if (result.type != ResultType.done) {
+        _showSnack('Could not open file: ${result.message}');
+      }
+    } catch (e) {
+      _showSnack('Error opening file: $e');
+    }
+  }
+
+  void _showSnack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg, style: const TextStyle(color: Colors.white)),
+        backgroundColor: const Color(0xFF1A1D2E),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  Widget _buildPagination() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.chevron_left, color: Colors.white54),
+            onPressed: _page > 1
+                ? () {
+                    _page--;
+                    _loadData();
+                  }
+                : null,
+          ),
+          Text('$_page / $_totalPages', style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 13)),
+          IconButton(
+            icon: const Icon(Icons.chevron_right, color: Colors.white54),
+            onPressed: _page < _totalPages
+                ? () {
+                    _page++;
+                    _loadData();
+                  }
+                : null,
+          ),
+        ],
+      ),
+    );
+  }
+}

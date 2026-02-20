@@ -28,12 +28,18 @@ router.get("/", (req, res) => {
       LIMIT ? OFFSET ?
     `).all(req.userId, limit, offset);
 
+    // Append 'Z' to created_at timestamps to mark them as UTC
+    const history = rows.map(row => ({
+      ...row,
+      created_at: row.created_at ? row.created_at + 'Z' : row.created_at
+    }));
+
     const total = db.prepare(
       "SELECT COUNT(*) as count FROM download_history WHERE user_id = ?"
     ).get(req.userId).count;
 
     res.json({
-      history: rows,
+      history,
       pagination: { page, limit, total, pages: Math.ceil(total / limit) },
     });
   } catch (err) {

@@ -207,5 +207,64 @@ router.get("/me", authMiddleware, (req, res) => {
   if (!user) return res.status(404).json({ error: "User not found." });
   res.json({ user });
 });
+// ── POST /api/auth/forgot-password ───────────────────────────────────────────
+router.post("/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: "Email is required." });
 
+    const user = db.prepare("SELECT id, name, verified FROM users WHERE email = ?").get(email.toLowerCase());
+    if (!user) return res.status(404).json({ error: "No account found with this email." });
+    if (!user.verified) return res.status(403).json({ error: "Email not verified. Please verify your account first." });
+
+    const code = generateCode();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    db.prepare("INSERT INTO email_verifications (user_id, code, expires_at) VALUES (?, ?, ?)").run(user.id, code, expiresAt);
+
+    sendVerificationEmail(email, code, user.name || "").catch(err => console.error("Email error:", err));
+    res.json({ message: "A password reset code has been sent to your email." });
+  } catch (err) {
+    console.error("Forgot password error:", err);
+    res.status(500).json({ error: "Server error." });
+  }
+});
+
+// ── POST /api/auth/reset-password ────────────────────────────────────────────
+router.post("/reset-password", async (req, res) => {
+  try {
+    const { email, code, newPassword } = req.body;
+    if (!email || !code || !newPassword) {
+      return res.status(400).json({ error: "Email, code, and new password are required." });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: "Password must be at least 6 characters." });
+    }
+
+    const user = db.prepare("SELECT id FROM users WHERE email = ?").get(email.toLowerCase());
+    if (!user) return res.status(404).json({ error: "No account found with this email." });
+
+    const verification = db.prepare(`
+      SELECT id FROM email_verifications
+      WHERE user_id = ? AND code = ? AND used = 0 AND expires_at > datetime('now')
+      ORDER BY id DESC LIMIT 1
+    `).get(user.id, code.toString());
+
+    if (!verification) {
+      return res.status(400).json({ error: "Invalid or expired code. Please request a new one." });
+    }
+
+    db.prepare("UPDATE email_verifications SET used = 1 WHERE id = ?").run(verification.id);
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(passwordHash, user.id);
+
+    const token = jwt.sign({ userId: user.id, email: email.toLowerCase() }, JWT_SECRET, {
+      expiresIn: TOKEN_EXPIRY,
+    });
+    const userData = db.prepare("SELECT id, email, name, created_at FROM users WHERE id = ?").get(user.id);
+    res.json({ message: "Password reset successfully!", token, user: userData });
+  } catch (err) {
+    console.error("Reset password error:", err);
+    res.status(500).json({ error: "Server error." });
+  }
+});
 module.exports = router;
