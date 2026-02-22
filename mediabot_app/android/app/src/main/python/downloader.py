@@ -36,21 +36,18 @@ def download_media(url, output_dir, mode):
         }
 
         if is_audio:
-            # Extract audio as MP3
+            # Extract best audio — no ffmpeg on Android, download native m4a/mp4a
+            # (m4a plays fine on all Android media players)
             ydl_opts.update({
-                "format": "bestaudio/best",
+                "format": "bestaudio[ext=m4a]/bestaudio[ext=mp4]/bestaudio/best[height<=480]",
                 "outtmpl": os.path.join(output_dir, "%(title).80s.%(ext)s"),
-                "postprocessors": [{
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": "192",
-                }],
+                # No postprocessors — ffmpeg is not available on-device
             })
         else:
-            # Download video as MP4
+            # Download video — use a pre-merged single file to avoid ffmpeg merge
+            # bestvideo+bestaudio format requires ffmpeg, so prefer best[ext=mp4]
             ydl_opts.update({
-                "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-                "merge_output_format": "mp4",
+                "format": "best[ext=mp4]/best[height<=720][ext=mp4]/best",
                 "outtmpl": os.path.join(output_dir, "%(title).80s.%(ext)s"),
             })
 
@@ -69,16 +66,8 @@ def download_media(url, output_dir, mode):
             title = info.get("title", "media")
 
             # Find the actual downloaded file
-            if is_audio:
-                # yt-dlp post-processes to .mp3
-                filename = ydl.prepare_filename(info)
-                # Replace extension with mp3
-                base = os.path.splitext(filename)[0]
-                filepath = base + ".mp3"
-            else:
-                filepath = ydl.prepare_filename(info)
-
-            # Verify file exists
+            filepath = ydl.prepare_filename(info)
+            if not os.path.exists(filepath):            # Verify file exists
             if not os.path.exists(filepath):
                 # Try to find any recently created file
                 files = sorted(
