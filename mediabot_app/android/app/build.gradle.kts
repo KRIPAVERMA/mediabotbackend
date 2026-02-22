@@ -48,6 +48,8 @@ chaquopy {
     defaultConfig {
         version = "3.8"
         pip {
+            // Force latest yt-dlp — old versions break on YouTube/Facebook
+            options("--upgrade")
             install("yt-dlp")
         }
     }
