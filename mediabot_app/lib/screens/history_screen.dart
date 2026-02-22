@@ -23,6 +23,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   // Tracks which history items are being re-downloaded
   final Set<int> _reDownloading = {};
+  // Set when a new download fires while _loadData is already running
+  bool _pendingRefresh = false;
 
   @override
   void initState() {
@@ -40,7 +42,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   void _onNewDownload() {
     _page = 1;
-    _loadData();
+    if (_isFetching) {
+      // A fetch is in progress; mark a pending refresh so it re-runs after
+      _pendingRefresh = true;
+    } else {
+      _loadData();
+    }
   }
 
   Future<void> _loadData() async {
@@ -105,6 +112,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
       }
     } finally {
       _isFetching = false;
+      // If a new download came in while we were fetching, refresh once more
+      if (_pendingRefresh && mounted) {
+        _pendingRefresh = false;
+        _loadData();
+      }
     }
   }
 
@@ -189,7 +201,17 @@ class _HistoryScreenState extends State<HistoryScreen> {
               children: [
                 _buildAppBar(),
                 if (_stats != null) _buildStats(),
-                Expanded(child: _loading ? _buildLoading() : _buildHistoryList()),
+                Expanded(
+                  child: RefreshIndicator(
+                    color: const Color(0xFFA78BFA),
+                    backgroundColor: const Color(0xFF1A1D2E),
+                    onRefresh: () async {
+                      _page = 1;
+                      await _loadData();
+                    },
+                    child: _loading ? _buildLoading() : _buildHistoryList(),
+                  ),
+                ),
               ],
             ),
           ),

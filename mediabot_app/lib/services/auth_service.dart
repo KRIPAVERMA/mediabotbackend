@@ -260,26 +260,40 @@ class AuthService {
   }) async {
     if (_token == null) return; // Not logged in, skip
 
-    try {
-      await http.post(
-        Uri.parse('${ApiService.baseUrl}/api/history'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $_token',
-        },
-        body: jsonEncode({
-          'url': url,
-          'mode': mode,
-          'platform': platform,
-          'format': format,
-          'filename': filename,
-          'title': title,
-        }),
-      ).timeout(const Duration(seconds: 10));
-      // Notify HistoryScreen to refresh
-      historyNotifier.value++;
-    } catch (_) {
-      // Silently ignore — don't break the download for history issues
+    final body = jsonEncode({
+      'url': url,
+      'mode': mode,
+      'platform': platform,
+      'format': format,
+      'filename': filename,
+      'title': title,
+    });
+    final headers = {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $_token',
+    };
+
+    // Try up to 2 times in case of transient network error
+    for (int attempt = 1; attempt <= 2; attempt++) {
+      try {
+        final res = await http.post(
+          Uri.parse('${ApiService.baseUrl}/api/history'),
+          headers: headers,
+          body: body,
+        ).timeout(const Duration(seconds: 10));
+
+        if (res.statusCode == 200 || res.statusCode == 201) {
+          // Saved successfully — tell HistoryScreen to refresh
+          historyNotifier.value++;
+          return;
+        }
+        // Server returned an error — retry after short delay
+        if (attempt < 2) await Future.delayed(const Duration(seconds: 2));
+      } catch (_) {
+        if (attempt < 2) await Future.delayed(const Duration(seconds: 2));
+      }
     }
+    // Both attempts failed — still trigger a refresh so the screen at least tries
+    historyNotifier.value++;
   }
 }
