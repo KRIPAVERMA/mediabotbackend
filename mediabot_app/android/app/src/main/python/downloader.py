@@ -67,7 +67,6 @@ def download_media(url, output_dir, mode):
 
             # Find the actual downloaded file
             filepath = ydl.prepare_filename(info)
-            if not os.path.exists(filepath):            # Verify file exists
             if not os.path.exists(filepath):
                 # Try to find any recently created file
                 files = sorted(
