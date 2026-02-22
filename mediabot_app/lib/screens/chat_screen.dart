@@ -3,6 +3,7 @@ import 'package:open_file/open_file.dart';
 import '../models/chat_models.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../services/local_history_service.dart';
 import '../services/ytdlp_service.dart';
 import '../widgets/animated_background.dart';
 import '../widgets/chat_bubble.dart';
@@ -150,6 +151,16 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         platform: mode.platform,
         format: mode.format,
         filename: filePath.split('/').last,
+      );
+
+      // Also save locally on-device so history is never lost
+      await LocalHistoryService.addEntry(
+        url: url,
+        mode: mode.id,
+        platform: mode.platform,
+        format: mode.format,
+        filename: filePath.split('/').last,
+        filePath: filePath,
       );
 
       setState(() {

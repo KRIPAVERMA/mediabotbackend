@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:open_file/open_file.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/auth_service.dart';
+import '../services/local_history_service.dart';
 import '../services/ytdlp_service.dart';
 import '../widgets/animated_background.dart';
 
@@ -25,6 +26,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
   final Set<int> _reDownloading = {};
   // Set when a new download fires while _loadData is already running
   bool _pendingRefresh = false;
+  // Debug info shown on screen
+  String _debugInfo = '';
 
   @override
   void initState() {
@@ -57,58 +60,105 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     if (mounted) setState(() => _loading = true);
     try {
-      if (!AuthService.isLoggedIn) {
-        if (mounted) {
-          setState(() {
-            _history = [];
-            _stats = null;
-            _loading = false;
-          });
-        }
-        _isFetching = false;
-        return;
-      }
+      final loggedIn = AuthService.isLoggedIn;
+      final hasToken = AuthService.token != null;
+      final email = AuthService.currentUser?['email'] ?? 'null';
+      print('[History] _loadData: loggedIn=$loggedIn, token=$hasToken, email=$email');
 
-      final results = await Future.wait([
-        AuthService.getHistory(page: _page),
-        AuthService.getStats(),
-      ]);
+      // ── Try server history first (if logged in) ──
+      bool serverOk = false;
+      List<dynamic> serverHistory = [];
+      Map<String, dynamic>? serverStats;
+      int sTotalPages = 1;
+      int sPage = 1;
 
-      final histResult = results[0];
-      final statsResult = results[1];
+      if (loggedIn) {
+        try {
+          final results = await Future.wait([
+            AuthService.getHistory(page: _page),
+            AuthService.getStats(),
+          ]);
+          final histResult = results[0];
+          final statsResult = results[1];
+          final hCount = (histResult['history'] as List?)?.length ?? 0;
+          print('[History] server: success=${histResult['success']}, count=$hCount');
 
-      if (mounted) {
-        setState(() {
-          // Always reset based on server response
           if (histResult['success'] == true) {
-            _history = histResult['history'] ?? [];
+            serverHistory = histResult['history'] ?? [];
             final pagination = histResult['pagination'];
             if (pagination != null) {
-              _totalPages = pagination['pages'] ?? 1;
-              _page = pagination['page'] ?? 1;
-            } else {
-              _totalPages = 1;
+              sTotalPages = pagination['pages'] ?? 1;
+              sPage = pagination['page'] ?? 1;
             }
+            serverOk = true;
+          }
+          if (statsResult['success'] == true && statsResult['stats'] != null) {
+            serverStats = statsResult['stats'];
+          }
+        } catch (e) {
+          print('[History] server fetch error: $e');
+        }
+      }
+
+      // ── Load local history ──
+      final localData = LocalHistoryService.getPage(page: _page);
+      final localHistory = localData['history'] as List<Map<String, dynamic>>;
+      final localStats = LocalHistoryService.getStats();
+      print('[History] local: ${localHistory.length} items, server: ${serverHistory.length} items, serverOk=$serverOk');
+
+      // ── Merge: prefer server if it has data, else use local ──
+      if (mounted) {
+        setState(() {
+          if (serverOk && serverHistory.isNotEmpty) {
+            // Server has data — use it
+            _history = serverHistory;
+            _totalPages = sTotalPages;
+            _page = sPage;
+            _stats = serverStats;
+            _debugInfo = 'Server: ${serverHistory.length} items ($email)';
+          } else if (localHistory.isNotEmpty) {
+            // Server empty/failed but local has data — use local
+            _history = localHistory;
+            final localPagination = localData['pagination'] as Map<String, dynamic>?;
+            _totalPages = localPagination?['pages'] ?? 1;
+            _page = localPagination?['page'] ?? 1;
+            _stats = {'totalDownloads': localStats['totalDownloads'], 'videoDownloads': localStats['videoDownloads'], 'audioDownloads': localStats['audioDownloads']};
+            _debugInfo = 'Local: ${localHistory.length} items${loggedIn ? '' : ' (not logged in)'}';
           } else {
+            // Both empty
             _history = [];
             _totalPages = 1;
-          }
-          
-          if (statsResult['success'] == true && statsResult['stats'] != null) {
-            _stats = statsResult['stats'];
-          } else {
-            _stats = null;
+            _stats = serverStats;
+            _debugInfo = loggedIn ? 'No history on server or device ($email)' : 'Not logged in, no local history';
           }
           _loading = false;
         });
       }
     } catch (e) {
+      print('[History] ERROR: $e');
       if (mounted) {
+        // Even on error, try to show local history
+        final localData = LocalHistoryService.getPage(page: _page);
+        final localHistory = localData['history'] as List<Map<String, dynamic>>;
+        final localStats = LocalHistoryService.getStats();
         setState(() {
-          _history = [];
-          _stats = null;
+          if (localHistory.isNotEmpty) {
+            _history = localHistory;
+            final localPagination = localData['pagination'] as Map<String, dynamic>?;
+            _totalPages = localPagination?['pages'] ?? 1;
+            _page = localPagination?['page'] ?? 1;
+            _stats = {'totalDownloads': localStats['totalDownloads'], 'videoDownloads': localStats['videoDownloads'], 'audioDownloads': localStats['audioDownloads']};
+            _debugInfo = 'Local fallback: ${localHistory.length} items (server error)';
+          } else {
+            _history = [];
+            _stats = null;
+            _debugInfo = 'Error: $e';
+          }
           _loading = false;
         });
+        if (localHistory.isEmpty) {
+          _showSnack('Failed to load history: ${e.toString().replaceFirst("Exception: ", "")}');
+        }
       }
     } finally {
       _isFetching = false;
@@ -296,6 +346,17 @@ class _HistoryScreenState extends State<HistoryScreen> {
             const SizedBox(height: 4),
             Text('Your download history will appear here',
                 style: TextStyle(fontSize: 13, color: Colors.white.withValues(alpha: 0.3))),
+            if (_debugInfo.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Text(
+                  _debugInfo,
+                  style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.25)),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ],
           ],
         ),
       );

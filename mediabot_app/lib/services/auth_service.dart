@@ -42,22 +42,29 @@ class AuthService {
     // Validate token is still good
     if (_token != null) {
       try {
+        print('[AuthService.init] Validating token via /api/auth/me ...');
         final res = await http.get(
           Uri.parse('${ApiService.baseUrl}/api/auth/me'),
           headers: {'Authorization': 'Bearer $_token'},
         ).timeout(const Duration(seconds: 5));
 
+        print('[AuthService.init] /api/auth/me status=${res.statusCode}');
         if (res.statusCode == 200) {
           final body = jsonDecode(res.body);
           _currentUser = body['user'];
           await prefs.setString(_userKey, jsonEncode(_currentUser));
+          print('[AuthService.init] Token valid. User: ${_currentUser?['email']}');
         } else {
           // Token expired
+          print('[AuthService.init] Token EXPIRED (status ${res.statusCode}). Logging out.');
           await logout();
         }
-      } catch (_) {
+      } catch (e) {
         // Network error — keep cached user, don't logout
+        print('[AuthService.init] Network error checking token: $e — keeping cached user');
       }
+    } else {
+      print('[AuthService.init] No token found in storage.');
     }
     // Scope local history to this user (or guest if not logged in)
     await LocalHistoryService.setUser(_currentUser != null ? _currentUser!['id']?.toString() : null);
@@ -204,17 +211,30 @@ class AuthService {
   // ── Get History ──────────────────────────────────────────
 
   static Future<Map<String, dynamic>> getHistory({int page = 1, int limit = 20}) async {
-    if (_token == null) return {'success': false, 'message': 'Not logged in'};
-
-    final res = await http.get(
-      Uri.parse('${ApiService.baseUrl}/api/history?page=$page&limit=$limit'),
-      headers: {'Authorization': 'Bearer $_token'},
-    ).timeout(const Duration(seconds: 10));
-
-    if (res.statusCode == 200) {
-      return {'success': true, ...jsonDecode(res.body)};
+    if (_token == null) {
+      print('[getHistory] SKIPPED — no token');
+      return {'success': false, 'message': 'Not logged in'};
     }
-    return {'success': false, 'message': 'Failed to load history.'};
+
+    try {
+      print('[getHistory] GET ${ApiService.baseUrl}/api/history?page=$page&limit=$limit');
+      final res = await http.get(
+        Uri.parse('${ApiService.baseUrl}/api/history?page=$page&limit=$limit'),
+        headers: {'Authorization': 'Bearer $_token'},
+      ).timeout(const Duration(seconds: 10));
+
+      print('[getHistory] status=${res.statusCode}, bodyLen=${res.body.length}');
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body);
+        print('[getHistory] success, historyCount=${(decoded['history'] as List?)?.length ?? 0}');
+        return {'success': true, ...decoded};
+      }
+      print('[getHistory] FAILED status=${res.statusCode}, body=${res.body}');
+      return {'success': false, 'message': 'Server returned ${res.statusCode}'};
+    } catch (e) {
+      print('[getHistory] ERROR: $e');
+      return {'success': false, 'message': 'Network error: $e'};
+    }
   }
 
   // ── Get Stats ────────────────────────────────────────────
@@ -258,7 +278,11 @@ class AuthService {
     String? filename,
     String? title,
   }) async {
-    if (_token == null) return; // Not logged in, skip
+    print('[recordHistory] called. token=${_token != null ? "present" : "NULL"}, url=$url, mode=$mode');
+    if (_token == null) {
+      print('[recordHistory] SKIPPED — no token');
+      return;
+    }
 
     final body = jsonEncode({
       'url': url,
@@ -276,12 +300,14 @@ class AuthService {
     // Try up to 2 times in case of transient network error
     for (int attempt = 1; attempt <= 2; attempt++) {
       try {
+        print('[recordHistory] attempt $attempt → POST ${ApiService.baseUrl}/api/history');
         final res = await http.post(
           Uri.parse('${ApiService.baseUrl}/api/history'),
           headers: headers,
           body: body,
         ).timeout(const Duration(seconds: 10));
 
+        print('[recordHistory] attempt $attempt → status=${res.statusCode}, body=${res.body}');
         if (res.statusCode == 200 || res.statusCode == 201) {
           // Saved successfully — tell HistoryScreen to refresh
           historyNotifier.value++;
@@ -289,10 +315,12 @@ class AuthService {
         }
         // Server returned an error — retry after short delay
         if (attempt < 2) await Future.delayed(const Duration(seconds: 2));
-      } catch (_) {
+      } catch (e) {
+        print('[recordHistory] attempt $attempt ERROR: $e');
         if (attempt < 2) await Future.delayed(const Duration(seconds: 2));
       }
     }
+    print('[recordHistory] BOTH attempts failed — triggering refresh anyway');
     // Both attempts failed — still trigger a refresh so the screen at least tries
     historyNotifier.value++;
   }
