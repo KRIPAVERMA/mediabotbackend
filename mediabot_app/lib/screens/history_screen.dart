@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:open_file/open_file.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/auth_service.dart';
+import '../services/ytdlp_service.dart';
 import '../widgets/animated_background.dart';
 
 class HistoryScreen extends StatefulWidget {
@@ -19,9 +21,25 @@ class _HistoryScreenState extends State<HistoryScreen> {
   int _page = 1;
   int _totalPages = 1;
 
+  // Tracks which history items are being re-downloaded
+  final Set<int> _reDownloading = {};
+
   @override
   void initState() {
     super.initState();
+    _loadData();
+    // Refresh whenever a new download is recorded
+    AuthService.historyNotifier.addListener(_onNewDownload);
+  }
+
+  @override
+  void dispose() {
+    AuthService.historyNotifier.removeListener(_onNewDownload);
+    super.dispose();
+  }
+
+  void _onNewDownload() {
+    _page = 1;
     _loadData();
   }
 
@@ -87,6 +105,52 @@ class _HistoryScreenState extends State<HistoryScreen> {
       }
     } finally {
       _isFetching = false;
+    }
+  }
+
+  /// Map platform + format to the mode ID used by YtDlpService.
+  String _getModeId(String platform, String format) {
+    final p = platform.toLowerCase();
+    final f = format.toUpperCase();
+    if (p == 'youtube') return f == 'MP3' ? 'youtube-mp3' : 'youtube-video';
+    if (p == 'instagram') return f == 'MP3' ? 'instagram-mp3' : 'instagram-video';
+    if (p == 'facebook') return f == 'MP3' ? 'facebook-mp3' : 'facebook-video';
+    return 'youtube-video';
+  }
+
+  /// Re-download a history item on this device via yt-dlp.
+  Future<void> _reDownloadItem(Map<String, dynamic> item) async {
+    final id = item['id'] as int? ?? 0;
+    final url = item['url'] ?? '';
+    final platform = item['platform'] ?? '';
+    final format = item['format'] ?? 'MP4';
+
+    if (url.isEmpty) { _showSnack('No URL saved for this item.'); return; }
+
+    setState(() => _reDownloading.add(id));
+    try {
+      final modeId = _getModeId(platform, format);
+      final filePath = await YtDlpService.download(url: url, mode: modeId);
+      if (!mounted) return;
+      _showSnack('✅ Downloaded: ${filePath.split('/').last}');
+      try { await OpenFile.open(filePath); } catch (_) {}
+    } catch (e) {
+      if (!mounted) return;
+      _showSnack('❌ ${e.toString().replaceFirst('Exception: ', '')}');
+    } finally {
+      if (mounted) setState(() => _reDownloading.remove(id));
+    }
+  }
+
+  /// Open the original URL in the external browser.
+  Future<void> _openUrl(String url) async {
+    if (url.isEmpty) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null) { _showSnack('Invalid URL'); return; }
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      _showSnack('Could not open URL');
     }
   }
 
@@ -234,7 +298,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final format = item['format'] ?? '';
     final url = item['url'] ?? '';
     final createdAt = item['created_at'] ?? '';
-    final id = item['id'];
+    final id = item['id'] as int? ?? 0;
 
     String icon = '🎬';
     if (platform == 'YouTube') icon = format == 'MP3' ? '🎵' : '🎬';
@@ -246,35 +310,31 @@ class _HistoryScreenState extends State<HistoryScreen> {
     if (platform == 'Instagram') platformColor = const Color(0xFFF472B6);
     if (platform == 'Facebook') platformColor = const Color(0xFF60A5FA);
 
-    // Format the date as real local date & time
+    // Convert to IST (UTC+5:30) regardless of device timezone
     String dateStr = '';
     try {
       DateTime dt;
-      if (createdAt is String) {
-        // Parse the datetime string; DateTime.parse handles 'Z' suffix automatically
-        dt = DateTime.parse(createdAt);
-        // Convert UTC to local; leave local times as-is
-        if (dt.isUtc) dt = dt.toLocal();
+      if (createdAt is String && createdAt.isNotEmpty) {
+        dt = DateTime.parse(createdAt); // 'Z' suffix handled as UTC
+        if (!dt.isUtc) dt = dt.toUtc();
       } else {
-        dateStr = createdAt.toString();
-        dt = DateTime.now(); // fallback
+        dt = DateTime.now().toUtc();
       }
-      final now = DateTime.now();
-      final diff = now.difference(dt);
+      final ist = dt.add(const Duration(hours: 5, minutes: 30));
+      final nowIst = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
 
-      final hourPad = dt.hour.toString().padLeft(2, '0');
-      final minutePad = dt.minute.toString().padLeft(2, '0');
-      final timeStr = '$hourPad:$minutePad';
+      final h = ist.hour.toString().padLeft(2, '0');
+      final m = ist.minute.toString().padLeft(2, '0');
+      final timeStr = '$h:$m IST';
+      final day = ist.day.toString().padLeft(2, '0');
+      final month = ist.month.toString().padLeft(2, '0');
 
-      final day = dt.day.toString().padLeft(2, '0');
-      final month = dt.month.toString().padLeft(2, '0');
-
-      if (dt.year == now.year && dt.month == now.month && dt.day == now.day) {
+      if (ist.year == nowIst.year && ist.month == nowIst.month && ist.day == nowIst.day) {
         dateStr = 'Today  $timeStr';
-      } else if (diff.inDays == 1 || (dt.day == now.day - 1 && dt.month == now.month)) {
+      } else if (ist.year == nowIst.year && ist.month == nowIst.month && ist.day == nowIst.day - 1) {
         dateStr = 'Yesterday  $timeStr';
       } else {
-        dateStr = '$day/$month/${dt.year}  $timeStr';
+        dateStr = '$day/$month/${ist.year}  $timeStr';
       }
     } catch (_) {
       dateStr = createdAt.toString();
@@ -286,16 +346,16 @@ class _HistoryScreenState extends State<HistoryScreen> {
       displayUrl = '${displayUrl.substring(0, 50)}...';
     }
 
-    return GestureDetector(
-      onTap: () => _openDownloadedFile(item),
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.04),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
-        ),
-        child: ListTile(
+    final isReDownloading = _reDownloading.contains(id);
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+      ),
+      child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         leading: Container(
           width: 44,
@@ -333,17 +393,57 @@ class _HistoryScreenState extends State<HistoryScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(displayUrl, style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.4)), maxLines: 1, overflow: TextOverflow.ellipsis),
+              GestureDetector(
+                onTap: () => _openUrl(url),
+                child: Text(
+                  displayUrl,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: const Color(0xFF60A5FA).withValues(alpha: 0.8),
+                    decoration: TextDecoration.underline,
+                    decorationColor: const Color(0xFF60A5FA).withValues(alpha: 0.4),
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
               const SizedBox(height: 3),
               Text(dateStr, style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.3))),
             ],
           ),
         ),
-        trailing: IconButton(
-          icon: Icon(Icons.delete_outline, size: 18, color: Colors.white.withValues(alpha: 0.3)),
-          onPressed: () => _deleteItem(id),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Re-download button
+            if (isReDownloading)
+              const SizedBox(
+                width: 20, height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFA78BFA)),
+              )
+            else
+              Tooltip(
+                message: 'Re-download',
+                child: IconButton(
+                  icon: const Icon(Icons.cloud_download_outlined, size: 20, color: Color(0xFFA78BFA)),
+                  onPressed: () => _reDownloadItem(item),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                ),
+              ),
+            const SizedBox(width: 2),
+            // Delete button
+            Tooltip(
+              message: 'Delete',
+              child: IconButton(
+                icon: Icon(Icons.delete_outline, size: 18, color: Colors.white.withValues(alpha: 0.3)),
+                onPressed: () => _deleteItem(id),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              ),
+            ),
+          ],
         ),
-      ),
       ),
     );
   }

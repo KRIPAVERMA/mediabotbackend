@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'api_service.dart';
@@ -11,6 +12,9 @@ class AuthService {
 
   static String? _token;
   static Map<String, dynamic>? _currentUser;
+
+  /// Incremented whenever a download is recorded — HistoryScreen listens to refresh.
+  static final historyNotifier = ValueNotifier<int>(0);
 
   /// Get the current JWT token (or null).
   static String? get token => _token;
@@ -272,6 +276,8 @@ class AuthService {
           'title': title,
         }),
       ).timeout(const Duration(seconds: 10));
+      // Notify HistoryScreen to refresh
+      historyNotifier.value++;
     } catch (_) {
       // Silently ignore — don't break the download for history issues
     }
