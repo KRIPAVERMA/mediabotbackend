@@ -100,19 +100,13 @@ def download_media(url, output_dir, mode):
 
         # ── platform-specific tweaks ────────────────────────────────
         if platform == "youtube":
-            # YouTube Shorts & regular: User-Agent helps avoid 403s
             ydl_opts["http_headers"] = {"User-Agent": _MOBILE_UA}
 
         elif platform == "instagram":
             ydl_opts["http_headers"] = {"User-Agent": _MOBILE_UA}
 
         elif platform == "facebook":
-            # Facebook needs desktop UA to expose video formats
             ydl_opts["http_headers"] = {"User-Agent": _DESKTOP_UA}
-            # Some Facebook reels require the "sd" URL
-            ydl_opts.setdefault("extractor_args", {})["facebook"] = {
-                "format": "sd",
-            }
 
         # ── download ────────────────────────────────────────────────
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
