@@ -3,6 +3,7 @@ import 'package:open_file/open_file.dart';
 import '../models/chat_models.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../services/ytdlp_service.dart';
 import '../widgets/animated_background.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/option_cards.dart';
@@ -131,10 +132,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     setState(() => _progressStep = 2);
 
     try {
-      final filePath = await ApiService.download(
+      // Download on-device using yt-dlp (user's own IP, no server blocking)
+      final filePath = await YtDlpService.download(
         url: url,
         mode: mode.id,
-        format: mode.format,
       );
 
       setState(() => _progressStep = 3);
@@ -142,7 +143,14 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       setState(() => _progressStep = 4);
       await Future.delayed(const Duration(milliseconds: 500));
 
-      // Backend automatically records download history via JWT token
+      // Record download in server history (best-effort, won't block)
+      AuthService.recordHistory(
+        url: url,
+        mode: mode.id,
+        platform: mode.platform,
+        format: mode.format,
+        filename: filePath.split('/').last,
+      );
 
       setState(() {
         _progressStep = 0;

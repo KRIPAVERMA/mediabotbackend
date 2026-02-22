@@ -4,6 +4,7 @@ import '../models/chat_models.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/local_history_service.dart';
+import '../services/ytdlp_service.dart';
 import 'package:open_file/open_file.dart';
 
 /// Full-screen handler for URLs shared to MediaBot from other apps.
@@ -108,10 +109,9 @@ class _ShareDownloadScreenState extends State<ShareDownloadScreen> {
     });
 
     try {
-      final path = await ApiService.download(
+      final path = await YtDlpService.download(
         url: widget.sharedUrl,
         mode: mode.id,
-        format: mode.format,
       );
       _progressTimer?.cancel();
 
@@ -123,6 +123,16 @@ class _ShareDownloadScreenState extends State<ShareDownloadScreen> {
         format: mode.format,
         filename: filename,
         filePath: path,
+      );
+
+      // Record to server history (best-effort)
+      AuthService.recordHistory(
+        url: widget.sharedUrl,
+        mode: mode.id,
+        platform: mode.platform,
+        format: mode.format,
+        filename: filename,
+        title: filename,
       );
 
       setState(() {

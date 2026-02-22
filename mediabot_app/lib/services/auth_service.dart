@@ -241,4 +241,39 @@ class AuthService {
 
     return res.statusCode == 200;
   }
+
+  // ── Record History (for on-device downloads) ─────────────
+
+  /// Records a download in server history when the download was done
+  /// on-device via yt-dlp (not through the server download endpoint).
+  static Future<void> recordHistory({
+    required String url,
+    required String mode,
+    String? platform,
+    String? format,
+    String? filename,
+    String? title,
+  }) async {
+    if (_token == null) return; // Not logged in, skip
+
+    try {
+      await http.post(
+        Uri.parse('${ApiService.baseUrl}/api/history'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $_token',
+        },
+        body: jsonEncode({
+          'url': url,
+          'mode': mode,
+          'platform': platform,
+          'format': format,
+          'filename': filename,
+          'title': title,
+        }),
+      ).timeout(const Duration(seconds: 10));
+    } catch (_) {
+      // Silently ignore — don't break the download for history issues
+    }
+  }
 }

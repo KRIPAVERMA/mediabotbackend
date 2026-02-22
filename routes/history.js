@@ -13,6 +13,30 @@ const { authMiddleware } = require("../middleware/auth");
 // All routes require auth
 router.use(authMiddleware);
 
+// ── POST /api/history ──────────────────────────────────────
+// Record a download from on-device yt-dlp (no server-side download)
+router.post("/", (req, res) => {
+  try {
+    const { url, mode, platform, format, filename, title } = req.body;
+    if (!url || !mode) {
+      return res.status(400).json({ error: "url and mode are required." });
+    }
+
+    const platformName = (platform || mode.split("-")[0]);
+    const capPlatform = platformName.charAt(0).toUpperCase() + platformName.slice(1);
+    const fmt = format || (mode.endsWith("mp3") ? "MP3" : "MP4");
+
+    db.prepare(
+      "INSERT INTO download_history (user_id, url, mode, platform, format, filename) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(req.userId, url, mode, capPlatform, fmt, filename || title || '');
+
+    res.json({ message: "History recorded." });
+  } catch (err) {
+    console.error("History record error:", err);
+    res.status(500).json({ error: "Failed to record history." });
+  }
+});
+
 // ── GET /api/history ───────────────────────────────────────
 router.get("/", (req, res) => {
   try {

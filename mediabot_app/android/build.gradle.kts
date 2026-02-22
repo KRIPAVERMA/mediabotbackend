@@ -1,3 +1,14 @@
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath("com.android.tools.build:gradle:8.11.1")
+        classpath("com.chaquo.python:gradle:16.0.0")
+    }
+}
+
 allprojects {
     repositories {
         google()

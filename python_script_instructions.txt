@@ -1,0 +1,192 @@
+Copilot Task: Integrate yt-dlp in Mediabot Flutter Android App Using Chaquopy
+🎯 Goal
+
+Modify my existing Flutter project (Mediabot) to integrate yt-dlp using Chaquopy (embedded Python runtime for Android) so that:
+
+Downloads run locally on the user's Android device
+
+Uses user’s IP (no backend server)
+
+No subprocess hacks
+
+No server-side execution
+
+Android only
+
+Architecture:
+
+Flutter UI
+→ MethodChannel
+→ Android (Kotlin)
+→ Chaquopy (Python runtime)
+→ yt-dlp
+
+✅ STEP 1: Add Chaquopy to Android Project
+Modify: android/build.gradle
+
+Add inside buildscript:
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath "com.chaquo.python:gradle:14.0.2"
+    }
+}
+Modify: android/app/build.gradle
+
+Add:
+
+apply plugin: "com.chaquo.python"
+
+android {
+    defaultConfig {
+        ndk {
+            abiFilters "arm64-v8a", "armeabi-v7a"
+        }
+    }
+}
+
+python {
+    pip {
+        install "yt-dlp"
+    }
+}
+
+Ensure:
+
+Python runtime is bundled
+
+yt-dlp installed via pip
+
+Only arm64-v8a & armeabi-v7a supported
+
+✅ STEP 2: Create Python Script
+
+Create directory:
+
+android/app/src/main/python/
+
+Create file:
+
+downloader.py
+
+Add:
+
+import yt_dlp
+
+def download_video(url, output_path):
+    ydl_opts = {
+        "format": "best",
+        "outtmpl": output_path + "/%(title)s.%(ext)s",
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
+
+    return "Download complete"
+✅ STEP 3: Connect Kotlin to Python
+
+Modify MainActivity.kt.
+
+Requirements:
+
+Initialize Python using AndroidPlatform
+
+Create MethodChannel named "yt_dlp_channel"
+
+Handle method "download"
+
+Pass URL from Flutter to Python
+
+Save files in:
+
+getExternalFilesDir(null)!!.absolutePath
+
+Implementation logic:
+
+import com.chaquo.python.Python
+import com.chaquo.python.android.AndroidPlatform
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
+
+override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+    super.configureFlutterEngine(flutterEngine)
+
+    if (!Python.isStarted()) {
+        Python.start(AndroidPlatform(this))
+    }
+
+    MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "yt_dlp_channel")
+        .setMethodCallHandler { call, result ->
+
+            if (call.method == "download") {
+
+                val url = call.argument<String>("url")!!
+                val outputDir = getExternalFilesDir(null)!!.absolutePath
+
+                val py = Python.getInstance()
+                val module = py.getModule("downloader")
+
+                module.callAttr("download_video", url, outputDir)
+
+                result.success("Download started")
+            } else {
+                result.notImplemented()
+            }
+        }
+}
+✅ STEP 4: Flutter Side
+
+Create a Dart service class:
+
+import 'package:flutter/services.dart';
+
+class YtDlpService {
+  static const _channel = MethodChannel("yt_dlp_channel");
+
+  static Future<void> download(String url) async {
+    await _channel.invokeMethod("download", {
+      "url": url,
+    });
+  }
+}
+✅ STEP 5: Android Permissions
+
+Ensure AndroidManifest.xml includes:
+
+<uses-permission android:name="android.permission.INTERNET" />
+
+If needed for external storage (SDK dependent), handle storage permissions properly.
+
+⚙ Expected Behavior
+
+When user pastes a YouTube link:
+
+Flutter calls MethodChannel
+
+Kotlin receives URL
+
+Kotlin invokes Python
+
+yt-dlp runs inside embedded Python runtime
+
+File downloads directly using user's internet
+
+File saved in app directory
+
+No backend involved.
+
+⚠ Constraints
+
+Android only
+
+APK size increases (~40–60MB)
+
+Background downloads not implemented yet
+
+No progress callback yet
+
+No format selection yet
