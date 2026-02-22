@@ -125,8 +125,8 @@ class _ShareDownloadScreenState extends State<ShareDownloadScreen> {
         filePath: path,
       );
 
-      // Record to server history (best-effort)
-      AuthService.recordHistory(
+      // Record to server history (awaited so history is up-to-date)
+      await AuthService.recordHistory(
         url: widget.sharedUrl,
         mode: mode.id,
         platform: mode.platform,

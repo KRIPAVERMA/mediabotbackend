@@ -143,8 +143,8 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       setState(() => _progressStep = 4);
       await Future.delayed(const Duration(milliseconds: 500));
 
-      // Record download in server history (best-effort, won't block)
-      AuthService.recordHistory(
+      // Record download in server history (awaited so history is up-to-date)
+      await AuthService.recordHistory(
         url: url,
         mode: mode.id,
         platform: mode.platform,
