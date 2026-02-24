@@ -216,29 +216,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
   }
 
-  Future<void> _deleteItem(int id) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1D2E),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Delete?', style: TextStyle(color: Colors.white)),
-        content: const Text('Remove this from your history?', style: TextStyle(color: Colors.white70)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
-          ),
-        ],
-      ),
-    );
 
-    if (confirmed == true) {
-      await AuthService.deleteHistoryItem(id);
-      _loadData();
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -514,17 +492,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                 ),
               ),
-            const SizedBox(width: 2),
-            // Delete button
-            Tooltip(
-              message: 'Delete',
-              child: IconButton(
-                icon: Icon(Icons.delete_outline, size: 18, color: Colors.white.withValues(alpha: 0.3)),
-                onPressed: () => _deleteItem(id),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              ),
-            ),
+
           ],
         ),
       ),

@@ -29,9 +29,21 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+    }
 
-        ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+    flavorDimensions += "abi"
+    productFlavors {
+        create("arm64v8a") {
+            dimension = "abi"
+            ndk { abiFilters += listOf("arm64-v8a") }
+        }
+        create("armeabiv7a") {
+            dimension = "abi"
+            ndk { abiFilters += listOf("armeabi-v7a") }
+        }
+        create("x8664") {
+            dimension = "abi"
+            ndk { abiFilters += listOf("x86_64") }
         }
     }
 
